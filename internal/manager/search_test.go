@@ -2,6 +2,7 @@ package manager
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestSearchTable(t *testing.T) {
 	}
 	var out bytes.Buffer
 	f.m.Out = &out
-	if err := f.m.Search(""); err != nil {
+	if _, err := f.m.Search(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
@@ -41,22 +42,24 @@ func TestSearchTable(t *testing.T) {
 		t.Fatalf("expected header and two rows, got %q", out.String())
 	}
 	rows := [][]string{
-		{"NAME", "LATEST", "SIZE", "MAINTAINERS", "DESCRIPTION"},
-		{"demo", "1.0.0", "1.5 KiB", "@alice, @bob", "A package with 多行说明"},
-		{"long-package-name", "3.0.0", "2.0 MiB", "@oheco", "test package"},
+		{"NAME", "LATEST", "INSTALLED", "SIZE", "MAINTAINERS", "DESCRIPTION"},
+		{"demo", "1.0.0", "-", "1.5 KiB", "@alice, @bob", "A package with 多行说明"},
+		{"long-package-name", "3.0.0", "-", "2.0 MiB", "@oheco", "test package"},
 	}
 	for row, cells := range rows {
 		for col, cell := range cells {
-			position := strings.Index(lines[row], cell)
-			wantPosition := strings.Index(lines[0], rows[0][col])
-			if position != wantPosition {
-				t.Errorf("row %d column %s: %q starts at %d, want %d; output:\n%s", row, rows[0][col], cell, position, wantPosition, out.String())
+			start, end := strings.Index(lines[0], rows[0][col]), len(lines[row])
+			if col+1 < len(cells) {
+				end = strings.Index(lines[0], rows[0][col+1])
+			}
+			if start > end || end > len(lines[row]) || strings.TrimSpace(lines[row][start:end]) != cell {
+				t.Errorf("row %d column %s: want %q; output:\n%s", row, rows[0][col], cell, out.String())
 			}
 		}
 	}
 	// Matching remains case-insensitive and includes command names.
 	out.Reset()
-	if err := f.m.Search("LONG-TOOL"); err != nil {
+	if _, err := f.m.Search(context.Background(), "LONG-TOOL"); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "demo") || !strings.Contains(out.String(), "long-package-name") {
@@ -69,7 +72,7 @@ func TestSearchUnavailableAndNoMatches(t *testing.T) {
 	f.m.Platform = "other-arm64"
 	var out bytes.Buffer
 	f.m.Out = &out
-	if err := f.m.Search("demo"); err != nil {
+	if _, err := f.m.Search(context.Background(), "demo"); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
@@ -82,7 +85,7 @@ func TestSearchUnavailableAndNoMatches(t *testing.T) {
 		t.Fatalf("unavailable package size = %q, want -", got)
 	}
 	out.Reset()
-	if err := f.m.Search("no-such-package"); err != nil {
+	if _, err := f.m.Search(context.Background(), "no-such-package"); err != nil {
 		t.Fatal(err)
 	}
 	if got := out.String(); got != "No matching packages.\n" {

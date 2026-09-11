@@ -334,26 +334,80 @@ func (m *Manager) List() error {
 		fmt.Fprintln(m.Out, "No packages installed.")
 		return nil
 	}
+	// Maintainer metadata is optional here: installed versions remain listable
+	// even if the local index is missing or unusable.
+	idx, indexErr := m.LoadIndex()
+	if indexErr != nil {
+		idx = catalog.Index{}
+	}
+	maintainers := make(map[string]string, len(idx.Packages))
+	for _, p := range idx.Packages {
+		var names []string
+		for _, who := range p.Maintainers {
+			name := strings.Join(strings.Fields(who.Name), " ")
+			if name == "" {
+				name = "@" + who.GitHub
+			}
+			names = append(names, name)
+		}
+		maintainers[p.Name] = strings.Join(names, ", ")
+	}
+	table := tabwriter.NewWriter(m.Out, 0, 8, 2, ' ', 0)
+	fmt.Fprintln(table, "NAME\tVERSIONS (* = active)\tMAINTAINERS")
 	for _, name := range names {
 		p := s.Packages[name]
-		versions := make([]string, 0, len(p.Versions))
-		for v := range p.Versions {
-			versions = append(versions, v)
-		}
-		sort.Strings(versions)
-		for _, v := range versions {
-			marker := ""
+		versions := installedVersions(p, "")
+		for i, v := range versions {
 			if p.Active == v {
-				marker = " *"
+				versions[i] += "*"
 			}
-			fmt.Fprintf(m.Out, "%s@%s%s\n", name, v, marker)
 		}
+		who := maintainers[name]
+		if who == "" {
+			who = "-"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\n", name, strings.Join(versions, ", "), who)
 	}
-	return nil
+	return table.Flush()
 }
 
-func (m *Manager) Search(query string) error {
+func (m *Manager) Search(ctx context.Context, query string) (*IndexUpdate, error) {
+	checkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	checked := make(chan *IndexUpdate, 1)
+	client := *m
+	go func() {
+		update, _ := client.fetchIndex(checkCtx)
+		// Buffered so a late response cannot strand the goroutine after timeout.
+		checked <- update
+	}()
 	idx, err := m.LoadIndex()
+	if err != nil {
+		return nil, err
+	}
+	if err := m.searchLocal(ctx, idx, query); err != nil {
+		return nil, err
+	}
+	// The budget begins after local output is flushed, not when search starts.
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case update := <-checked:
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if update != nil && indexChanged(idx, update.index) {
+			return update, nil
+		}
+	case <-timer.C:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return nil, nil
+}
+
+func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query string) error {
+	state, err := m.LoadState()
 	if err != nil {
 		return err
 	}
@@ -361,6 +415,9 @@ func (m *Manager) Search(query string) error {
 	count := 0
 	table := tabwriter.NewWriter(m.Out, 0, 8, 2, ' ', 0)
 	for _, p := range idx.Packages {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		text := p.Name + " " + p.Description
 		for _, v := range p.Versions {
 			for _, a := range v.Artifacts {
@@ -386,10 +443,18 @@ func (m *Manager) Search(query string) error {
 				maintainers = append(maintainers, "@"+who.GitHub)
 			}
 			if count == 0 {
-				fmt.Fprintln(table, "NAME\tLATEST\tSIZE\tMAINTAINERS\tDESCRIPTION")
+				fmt.Fprintln(table, "NAME\tLATEST\tINSTALLED\tSIZE\tMAINTAINERS\tDESCRIPTION")
+			}
+			installed := "-"
+			versions := installedVersions(state.Packages[p.Name], m.Platform)
+			if len(versions) > 0 {
+				installed = versions[len(versions)-1]
+				if len(versions) > 1 {
+					installed += fmt.Sprintf(" (%d)", len(versions))
+				}
 			}
 			description := strings.Join(strings.Fields(p.Description), " ")
-			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", p.Name, latest, size, strings.Join(maintainers, ", "), description)
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Name, latest, installed, size, strings.Join(maintainers, ", "), description)
 			count++
 		}
 	}

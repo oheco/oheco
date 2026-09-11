@@ -32,8 +32,13 @@ oo install oheco
 ```
 
 - `update` 只更新索引，失败保留旧索引；`search`、`info` 查询本地索引。
-- `search` 以对齐表格显示名称、当前平台的最新版本、包大小、维护者和说明；
-  大小取对应下载包，维护者显示为 `@GitHub账号`。
+- `search` 以对齐表格显示名称、当前平台的最新版本、已安装版本、包大小、维护者和说明。
+  已安装列只显示版本号最新的已装版本；装有多个版本时标注总数，例如 `0.3.0 (3)`，
+  未安装显示 `-`。大小取对应下载包，维护者显示为 `@GitHub账号`。
+  本地查询开始时并行检查云端索引；本地结果输出完后最多再等 500 毫秒，超时或网络失败
+  不影响查询。发现索引内容更新时，在结果后询问是否更新，默认不更新；确认后保存已校验的
+  索引并提示重新执行 `oo search`。重定向或管道输出只提示执行 `oo update`，不会等待输入。
+  仅生成时间变化不会触发提示，过期的云端索引不会覆盖本地更新的索引。
 - `install name` 安装该平台的 `latest`；`install name@version` 安装指定版本。
   默认启用本次安装的版本；`--no-switch` 只安装，保留当前启用状态。
   下载时显示进度、已下载/总大小和平均下载速度；终端中每 200 毫秒刷新同一行，
@@ -41,7 +46,9 @@ oo install oheco
 - `switch name version` 只切换已安装版本，一起处理包内全部命令。
 - `remove name` 删除当前启用版本；`remove name@version` 删除指定版本；
   `remove name --all` 删除全部版本。删除启用版本后不自动选择其他版本。
-- `list` 用 `*` 标记启用版本。切换、卸载和列出安装状态不需要网络或远端索引。
+- `list` 以名称、全部已装版本、维护者三列显示，每个包一行，用 `*` 标记启用版本。
+  维护者优先显示本地索引中的姓名，没有姓名则显示 `@GitHub账号`；索引或对应包信息缺失时
+  显示 `-`。切换、卸载和列出安装状态不需要网络或远端索引。
 - `recover` 恢复中断事务。其他修改命令启动时也会自动恢复。
 - `oheco` 自身作为普通包更新和切换；删除 `oheco` 的启用版本也会删除默认 `oo`
   链接，可通过保留的 `oo@版本` 或安装脚本恢复。
@@ -60,11 +67,11 @@ oo install oheco
 
 ```text
 ~/.oheco/
-  packages/oheco/0.2.1/bin/oo
+  packages/oheco/0.3.0/bin/oo
   packages/ohos-sdk-toolchains/26.0.0.35-Beta/lib/binary-sign-tool
   packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
-  bin/oo@0.2.1 -> ../packages/oheco/0.2.1/bin/oo
-  bin/oo -> oo@0.2.1
+  bin/oo@0.3.0 -> ../packages/oheco/0.3.0/bin/oo
+  bin/oo -> oo@0.3.0
   bin/binary-sign-tool@26.0.0.35-Beta -> ../packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
   bin/binary-sign-tool -> binary-sign-tool@26.0.0.35-Beta
   index/index.json
@@ -101,16 +108,16 @@ build/oo --version
 ```
 
 `TMPDIR` 需按当前宿主应用的可写目录调整。构建脚本默认使用相邻 `go/bin/go`；
-`OHECO_VERSION` 默认 `0.2.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
+`OHECO_VERSION` 默认 `0.3.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
 签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 Linux 侧打包，不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.2.1
+python3 scripts/package.py --version 0.3.0
 ```
 
-输出 `dist/oheco-0.2.1-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
+输出 `dist/oheco-0.3.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
 包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成

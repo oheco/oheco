@@ -12,13 +12,13 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.2.1"
+var version = "0.3.0"
 
 const help = `oo — the oheco package manager
 
 Usage:
   oo update                          Refresh the local package index
-  oo search [query]                   Search the local index
+  oo search [query]                   Search locally and check for index updates
   oo info <package>                   Show available versions and package details
   oo install <package[@version]> [--no-switch]
   oo switch <package> <version>       Activate an installed version (offline)
@@ -69,7 +69,7 @@ func run(ctx context.Context, args []string) error {
 		if len(args) > 1 {
 			break
 		}
-		return m.Search(strings.Join(args, ""))
+		return search(ctx, m, strings.Join(args, ""), os.Stdin, terminal(os.Stdin) && terminal(os.Stdout))
 	case "info":
 		if len(args) != 1 {
 			break
