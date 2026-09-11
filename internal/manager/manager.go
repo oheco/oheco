@@ -342,15 +342,7 @@ func (m *Manager) List() error {
 	}
 	maintainers := make(map[string]string, len(idx.Packages))
 	for _, p := range idx.Packages {
-		var names []string
-		for _, who := range p.Maintainers {
-			name := strings.Join(strings.Fields(who.Name), " ")
-			if name == "" {
-				name = "@" + who.GitHub
-			}
-			names = append(names, name)
-		}
-		maintainers[p.Name] = strings.Join(names, ", ")
+		maintainers[p.Name] = maintainerNames(p.Maintainers)
 	}
 	table := tabwriter.NewWriter(m.Out, 0, 8, 2, ' ', 0)
 	fmt.Fprintln(table, "NAME\tVERSIONS (* = active)\tMAINTAINERS")
@@ -438,10 +430,6 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 				}
 				size = byteSize(float64(a.Size))
 			}
-			maintainers := make([]string, 0, len(p.Maintainers))
-			for _, who := range p.Maintainers {
-				maintainers = append(maintainers, "@"+who.GitHub)
-			}
 			if count == 0 {
 				fmt.Fprintln(table, "NAME\tLATEST\tINSTALLED\tSIZE\tMAINTAINERS\tDESCRIPTION")
 			}
@@ -454,7 +442,7 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 				}
 			}
 			description := strings.Join(strings.Fields(p.Description), " ")
-			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Name, latest, installed, size, strings.Join(maintainers, ", "), description)
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Name, latest, installed, size, maintainerNames(p.Maintainers), description)
 			count++
 		}
 	}

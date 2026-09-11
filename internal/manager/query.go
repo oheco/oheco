@@ -9,6 +9,21 @@ import (
 	"github.com/oheco/oheco/internal/catalog"
 )
 
+func maintainerNames(maintainers []catalog.Maintainer) string {
+	names := make([]string, 0, len(maintainers))
+	for _, who := range maintainers {
+		name := strings.Join(strings.Fields(who.Name), " ")
+		if name == "" {
+			name = "@" + who.GitHub
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "-"
+	}
+	return strings.Join(names, ", ")
+}
+
 func indexChanged(local, remote catalog.Index) bool {
 	localTime, _ := time.Parse(time.RFC3339, local.GeneratedAt)
 	remoteTime, _ := time.Parse(time.RFC3339, remote.GeneratedAt)

@@ -33,8 +33,8 @@ oo install oheco
 
 - `update` 只更新索引，失败保留旧索引；`search`、`info` 查询本地索引。
 - `search` 以对齐表格显示名称、当前平台的最新版本、已安装版本、包大小、维护者和说明。
-  已安装列只显示版本号最新的已装版本；装有多个版本时标注总数，例如 `0.3.0 (3)`，
-  未安装显示 `-`。大小取对应下载包，维护者显示为 `@GitHub账号`。
+  已安装列只显示版本号最新的已装版本；装有多个版本时标注总数，例如 `0.3.1 (3)`，
+  未安装显示 `-`。大小取对应下载包；维护者与 `list` 一致，优先显示姓名，没有姓名则显示 `@GitHub账号`。
   本地查询开始时并行检查云端索引；本地结果输出完后最多再等 500 毫秒，超时或网络失败
   不影响查询。发现索引内容更新时，在结果后询问是否更新，默认不更新；确认后保存已校验的
   索引并提示重新执行 `oo search`。重定向或管道输出只提示执行 `oo update`，不会等待输入。
@@ -67,11 +67,11 @@ oo install oheco
 
 ```text
 ~/.oheco/
-  packages/oheco/0.3.0/bin/oo
+  packages/oheco/0.3.1/bin/oo
   packages/ohos-sdk-toolchains/26.0.0.35-Beta/lib/binary-sign-tool
   packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
-  bin/oo@0.3.0 -> ../packages/oheco/0.3.0/bin/oo
-  bin/oo -> oo@0.3.0
+  bin/oo@0.3.1 -> ../packages/oheco/0.3.1/bin/oo
+  bin/oo -> oo@0.3.1
   bin/binary-sign-tool@26.0.0.35-Beta -> ../packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
   bin/binary-sign-tool -> binary-sign-tool@26.0.0.35-Beta
   index/index.json
@@ -108,16 +108,16 @@ build/oo --version
 ```
 
 `TMPDIR` 需按当前宿主应用的可写目录调整。构建脚本默认使用相邻 `go/bin/go`；
-`OHECO_VERSION` 默认 `0.3.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
+`OHECO_VERSION` 默认 `0.3.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
 签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 Linux 侧打包，不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.3.0
+python3 scripts/package.py --version 0.3.1
 ```
 
-输出 `dist/oheco-0.3.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
+输出 `dist/oheco-0.3.1-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
 包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成

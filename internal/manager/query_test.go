@@ -44,12 +44,19 @@ func TestInstalledSearchAndListTables(t *testing.T) {
 	if got := strings.TrimSpace(lines[1][start:end]); got != "1.10.0 (3)" {
 		t.Fatalf("installed summary = %q, want newest installed version and count", got)
 	}
+	start, end = strings.Index(lines[0], "MAINTAINERS"), strings.Index(lines[0], "DESCRIPTION")
+	searchMaintainers := strings.TrimSpace(lines[1][start:end])
 	out.Reset()
 	if err := f.m.List(); err != nil {
 		t.Fatal(err)
 	}
 	if got := out.String(); strings.Count(got, "\n") != 2 || !strings.Contains(got, "1.0.0*, 1.9.0, 1.10.0") || !strings.Contains(got, "Alice Example, @bob") {
 		t.Fatalf("incorrect grouped list: %q", got)
+	}
+	lines = strings.Split(strings.TrimSpace(out.String()), "\n")
+	listMaintainers := strings.TrimSpace(lines[1][strings.Index(lines[0], "MAINTAINERS"):])
+	if searchMaintainers != listMaintainers {
+		t.Fatalf("maintainer display differs: search=%q, list=%q", searchMaintainers, listMaintainers)
 	}
 	if err := os.Remove(filepath.Join(f.m.Root, "index", "index.json")); err != nil {
 		t.Fatal(err)
