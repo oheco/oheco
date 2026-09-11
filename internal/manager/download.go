@@ -19,6 +19,8 @@ import (
 const maxIndexSize = 32 << 20
 
 func HTTPClient() *http.Client {
+	// A nil Transport uses http.DefaultTransport, including its environment
+	// proxy settings (HTTPS_PROXY/https_proxy and NO_PROXY/no_proxy).
 	return &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return fmt.Errorf("too many HTTP redirects")
@@ -115,6 +117,9 @@ func (m *Manager) download(ctx context.Context, a catalog.Artifact) (string, err
 		return filename, nil
 	}
 	fmt.Fprintf(m.Out, "Downloading %s (%d bytes)\n", a.URL, a.Size)
+	progress := startDownloadProgress(m.Out, a.Size)
+	success := false
+	defer func() { progress.finish(success) }()
 	resp, err := m.get(ctx, a.URL)
 	if err != nil {
 		return "", err
@@ -126,7 +131,7 @@ func (m *Manager) download(ctx context.Context, a catalog.Artifact) (string, err
 	}
 	defer os.Remove(f.Name())
 	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, a.Size+1))
+	n, copyErr := io.Copy(io.MultiWriter(f, h, progress), io.LimitReader(resp.Body, a.Size+1))
 	closeErr := f.Close()
 	if copyErr != nil {
 		return "", copyErr
@@ -143,5 +148,6 @@ func (m *Manager) download(ctx context.Context, a catalog.Artifact) (string, err
 	if err := os.Rename(f.Name(), filename); err != nil {
 		return "", err
 	}
+	success = true
 	return filename, nil
 }

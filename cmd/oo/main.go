@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.2.0"
+var version = "0.2.1"
 
 const help = `oo — the oheco package manager
 

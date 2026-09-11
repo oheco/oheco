@@ -13,7 +13,7 @@ for obsolete in out.glob("*.json"):
 for name in ("oheco",):
     package = json.loads((root / f"packages/{name}.json").read_text())
     # Test the locally built release before publishing its immutable artifact.
-    release = "0.2.0"
+    release = "0.2.1"
     archive = root.parent / "oheco" / "dist" / f"oheco-{release}-ohos-arm64.tar.gz"
     if not any(v["version"] == release for v in package["versions"]):
         content = archive.read_bytes()

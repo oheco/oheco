@@ -32,8 +32,12 @@ oo install oheco
 ```
 
 - `update` 只更新索引，失败保留旧索引；`search`、`info` 查询本地索引。
+- `search` 以对齐表格显示名称、当前平台的最新版本、包大小、维护者和说明；
+  大小取对应下载包，维护者显示为 `@GitHub账号`。
 - `install name` 安装该平台的 `latest`；`install name@version` 安装指定版本。
   默认启用本次安装的版本；`--no-switch` 只安装，保留当前启用状态。
+  下载时显示进度、已下载/总大小和平均下载速度；终端中每 200 毫秒刷新同一行，
+  重定向输出时每 5 秒记录一行。下载结束显示最终状态，命中有效缓存时跳过下载。
 - `switch name version` 只切换已安装版本，一起处理包内全部命令。
 - `remove name` 删除当前启用版本；`remove name@version` 删除指定版本；
   `remove name --all` 删除全部版本。删除启用版本后不自动选择其他版本。
@@ -48,13 +52,19 @@ oo install oheco
 `OHECO_INDEX_URL` 可覆盖索引地址。正式源必须使用 HTTPS；仅 loopback 允许 HTTP，
 用于本地开发与集成测试。客户端按原生 `GOOS-GOARCH` 选择产物，不将 Linux 当成鸿蒙。
 
+索引和软件包下载遵循 Go 标准库的代理环境变量：HTTPS 使用 `HTTPS_PROXY` 或
+`https_proxy`，HTTP 使用 `HTTP_PROXY` 或 `http_proxy`，大写非空值优先；
+`NO_PROXY` / `no_proxy` 指定直连目标，localhost 和 loopback 地址始终直连。
+变量需要导出到 `oo` 进程，例如 `export https_proxy=http://127.0.0.1:7890`。
+`ALL_PROXY` / `all_proxy` 不会自动读取。
+
 ```text
 ~/.oheco/
-  packages/oheco/0.2.0/bin/oo
+  packages/oheco/0.2.1/bin/oo
   packages/ohos-sdk-toolchains/26.0.0.35-Beta/lib/binary-sign-tool
   packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
-  bin/oo@0.2.0 -> ../packages/oheco/0.2.0/bin/oo
-  bin/oo -> oo@0.2.0
+  bin/oo@0.2.1 -> ../packages/oheco/0.2.1/bin/oo
+  bin/oo -> oo@0.2.1
   bin/binary-sign-tool@26.0.0.35-Beta -> ../packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
   bin/binary-sign-tool -> binary-sign-tool@26.0.0.35-Beta
   index/index.json
@@ -91,16 +101,16 @@ build/oo --version
 ```
 
 `TMPDIR` 需按当前宿主应用的可写目录调整。构建脚本默认使用相邻 `go/bin/go`；
-`OHECO_VERSION` 默认 `0.2.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
+`OHECO_VERSION` 默认 `0.2.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
 签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 Linux 侧打包，不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.2.0
+python3 scripts/package.py --version 0.2.1
 ```
 
-输出 `dist/oheco-0.2.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
+输出 `dist/oheco-0.2.1-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
 包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成

@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/oheco/oheco/internal/catalog"
@@ -358,6 +359,7 @@ func (m *Manager) Search(query string) error {
 	}
 	query = strings.ToLower(query)
 	count := 0
+	table := tabwriter.NewWriter(m.Out, 0, 8, 2, ' ', 0)
 	for _, p := range idx.Packages {
 		text := p.Name + " " + p.Description
 		for _, v := range p.Versions {
@@ -369,17 +371,32 @@ func (m *Manager) Search(query string) error {
 		}
 		if strings.Contains(strings.ToLower(text), query) {
 			latest := p.Latest[m.Platform]
+			size := "-"
 			if latest == "" {
 				latest = "unavailable for " + m.Platform
+			} else {
+				_, a, err := p.Resolve(latest, m.Platform)
+				if err != nil {
+					return err
+				}
+				size = byteSize(float64(a.Size))
 			}
-			fmt.Fprintf(m.Out, "%s\t%s\t%s\n", p.Name, latest, p.Description)
+			maintainers := make([]string, 0, len(p.Maintainers))
+			for _, who := range p.Maintainers {
+				maintainers = append(maintainers, "@"+who.GitHub)
+			}
+			if count == 0 {
+				fmt.Fprintln(table, "NAME\tLATEST\tSIZE\tMAINTAINERS\tDESCRIPTION")
+			}
+			description := strings.Join(strings.Fields(p.Description), " ")
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", p.Name, latest, size, strings.Join(maintainers, ", "), description)
 			count++
 		}
 	}
 	if count == 0 {
 		fmt.Fprintln(m.Out, "No matching packages.")
 	}
-	return nil
+	return table.Flush()
 }
 
 func (m *Manager) Info(name string) error {
