@@ -110,7 +110,7 @@ func verifyFile(filename string, a catalog.Artifact) error {
 }
 
 func (m *Manager) download(ctx context.Context, a catalog.Artifact) (string, error) {
-	filename := filepath.Join(m.Root, "cache", "downloads", a.SHA256+".tar.gz")
+	filename := filepath.Join(m.Root, "cache", "downloads", a.SHA256+"."+a.Format)
 	if verifyFile(filename, a) == nil {
 		return filename, nil
 	}

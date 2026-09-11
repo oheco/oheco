@@ -152,10 +152,10 @@ func (m *Manager) installLocked(ctx context.Context, name, version string, a cat
 		p.Versions = map[string]Receipt{}
 	}
 	if r, exists := p.Versions[version]; exists {
-		if r.Platform != m.Platform || r.Artifact.SHA256 != a.SHA256 || r.Artifact.Size != a.Size || r.Artifact.StripComponents != a.StripComponents || !reflect.DeepEqual(r.Artifact.Binaries, a.Binaries) {
+		if r.Platform != m.Platform || r.Artifact.SHA256 != a.SHA256 || r.Artifact.Size != a.Size || r.Artifact.Format != a.Format || r.Artifact.StripComponents != a.StripComponents || !reflect.DeepEqual(r.Artifact.Binaries, a.Binaries) || !reflect.DeepEqual(r.Artifact.Launchers, a.Launchers) {
 			return fmt.Errorf("%s@%s is already installed with different contents; publish a new version", name, version)
 		}
-		if err := verifyBinaries(filepath.Join(m.Root, "packages", name, version), r.Artifact); err != nil {
+		if err := verifyInstalled(filepath.Join(m.Root, "packages", name, version), r.Artifact); err != nil {
 			return err
 		}
 		if !noSwitch {
@@ -207,6 +207,9 @@ func (m *Manager) installLocked(ctx context.Context, name, version string, a cat
 	if err := extract(ctx, archive, stage, a); err != nil {
 		return err
 	}
+	if err := createLaunchers(stage, a); err != nil {
+		return err
+	}
 	if name == "oheco" {
 		checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
@@ -246,7 +249,7 @@ func (m *Manager) Switch(name, version string) error {
 		if !ok {
 			return fmt.Errorf("%s@%s is not installed; run oo install %s@%s", name, version, name, version)
 		}
-		if err := verifyBinaries(filepath.Join(m.Root, "packages", name, version), r.Artifact); err != nil {
+		if err := verifyInstalled(filepath.Join(m.Root, "packages", name, version), r.Artifact); err != nil {
 			return err
 		}
 		after := cloneState(before)

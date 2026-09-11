@@ -5,7 +5,7 @@ setopt PIPE_FAIL
 test_root=$(mktemp -d "$HOME/.oheco-e2e.XXXXXXXX")
 trap 'rm -rf -- "$test_root"' EXIT
 export OHECO_ROOT="$test_root/root with spaces"
-export OHECO_INDEX_URL=http://127.0.0.1:18808/index/v1/index.json
+export OHECO_INDEX_URL=http://127.0.0.1:18808/index/v2/index.json
 export ZDOTDIR="$test_root/zsh"
 mkdir -p "$ZDOTDIR"
 print -r -- '# existing user configuration' > "$ZDOTDIR/.zshrc"
@@ -13,16 +13,15 @@ curl -fsSL http://127.0.0.1:18808/install.sh | zsh
 oo_bin="$OHECO_ROOT/bin/oo"
 "$oo_bin" --version
 "$oo_bin" search
-"$oo_bin" info go
-"$oo_bin" install go
-unset GOROOT
-"$OHECO_ROOT/bin/go" version
-[[ $("$OHECO_ROOT/bin/go" env GOROOT) = "$OHECO_ROOT/packages/go/1.27.1" ]]
-[[ $("$OHECO_ROOT/bin/go" env GOOS) = ohos ]]
-"$OHECO_ROOT/bin/gofmt@1.27.1" -h >/dev/null 2>&1
-print -r -- 'package main; import "fmt"; func main(){fmt.Println("PASS installed Go compile and run")}' > "$test_root/hello.go"
-GOTOOLCHAIN=local "$OHECO_ROOT/bin/go" run "$test_root/hello.go"
-"$oo_bin" install go@1.27.1
+"$oo_bin" info oheco
+"$oo_bin" install oheco@0.1.0 --no-switch
+# Exercise upgrading from the previous release using its v1 endpoint.
+"$oo_bin" switch oheco 0.1.0
+"$OHECO_ROOT/bin/oo@0.1.0" remove oheco@0.2.0
+OHECO_INDEX_URL=http://127.0.0.1:18808/index/v1/index.json "$OHECO_ROOT/bin/oo@0.1.0" update
+"$OHECO_ROOT/bin/oo@0.1.0" install oheco
+[[ $("$oo_bin" --version) = 'oo 0.2.0 '* ]]
+"$oo_bin" update
 "$oo_bin" list
 # The second bootstrap must not duplicate or erase zsh configuration.
 curl -fsSL http://127.0.0.1:18808/install.sh | zsh
@@ -30,13 +29,13 @@ rc_content=$(<"$ZDOTDIR/.zshrc")
 [[ $rc_content = *'# existing user configuration'* ]]
 [[ ${#${(M)${(f)rc_content}:#'# oheco: command path'}} = 1 ]]
 zsh -f -c 'source "$ZDOTDIR/.zshrc"; command -v oo; oo --version'
+# A normal new interactive zsh must load .zshrc without an explicit source.
+zsh -i -c '[[ $(command -v oo) = "$OHECO_ROOT/bin/oo" ]] && oo --version'
 # Switching and removing must work even after the index is gone.
 rm "$OHECO_ROOT/index/index.json"
-"$oo_bin" switch go 1.27.1
-"$oo_bin" remove go@1.27.1
-[[ ! -e "$OHECO_ROOT/bin/go" && ! -L "$OHECO_ROOT/bin/go@1.27.1" ]]
-[[ ! -e "$OHECO_ROOT/bin/gofmt" && ! -L "$OHECO_ROOT/bin/gofmt@1.27.1" ]]
-[[ ! -d "$OHECO_ROOT/packages/go/1.27.1" ]]
 "$oo_bin" switch oheco 0.1.0
+"$OHECO_ROOT/bin/oo@0.2.0" switch oheco 0.2.0
+"$oo_bin" remove oheco@0.1.0
+[[ ! -L "$OHECO_ROOT/bin/oo@0.1.0" ]]
 "$oo_bin" list
-print 'PASS native bootstrap, PATH, Go install/relocation/compile, idempotence, offline switch/remove'
+print 'PASS native bootstrap, PATH, v1 client upgrade, idempotence and offline lifecycle'

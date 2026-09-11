@@ -62,8 +62,11 @@ OHECO_PACKAGE_MANIFEST
         print -rl -- '' "$oo_marker" "$oo_path_line" >> "$oo_rc"
         print "Added PATH configuration to $oo_rc"
       fi
+      print 'New zsh terminals will find oo automatically. To load the configuration now, run:'
+      print -r -- "  source ${(q)oo_rc}"
     fi
-    print 'Installed. Open a new terminal or run:'
+    # curl | zsh runs in a child process and cannot change its parent's PATH.
+    print 'Installed. To enable oo only in the current terminal, run:'
     print -r -- "  $oo_path_line"
     print 'Then run: oo search'
   } always {

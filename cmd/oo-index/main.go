@@ -41,7 +41,7 @@ func run() error {
 	if len(files) == 0 {
 		return fmt.Errorf("no package descriptors found")
 	}
-	idx := catalog.Index{SchemaVersion: 1, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Packages: []catalog.Package{}}
+	idx := catalog.Index{SchemaVersion: catalog.SchemaVersion, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Packages: []catalog.Package{}}
 	for _, file := range files {
 		f, err := os.Open(file)
 		if err != nil {
@@ -110,14 +110,7 @@ func run() error {
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 	installer := strings.NewReplacer("@@VERSION@@", quote(version), "@@URL@@", quote(a.URL), "@@SHA256@@", quote(a.SHA256), "@@MANIFEST@@", string(manifest)).Replace(string(tmpl))
-	if err := os.MkdirAll(filepath.Join(*output, "index", "v1"), 0755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(idx, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(*output, "index", "v1", "index.json"), append(data, '\n'), 0644); err != nil {
+	if err := writeIndexes(*output, idx); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(*output, "install.sh"), []byte(installer), 0755); err != nil {
@@ -150,5 +143,25 @@ func run() error {
 		return err
 	}
 	fmt.Printf("Built %s: %d packages; bootstrap oheco %s\n", *output, len(idx.Packages), version)
+	return nil
+}
+
+func writeIndexes(output string, idx catalog.Index) error {
+	for _, index := range []catalog.Index{idx, idx.Legacy()} {
+		if err := index.Validate(); err != nil {
+			return err
+		}
+		dir := filepath.Join(output, "index", fmt.Sprintf("v%d", index.SchemaVersion))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(index, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, "index.json"), append(data, '\n'), 0644); err != nil {
+			return err
+		}
+	}
 	return nil
 }

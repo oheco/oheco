@@ -11,21 +11,23 @@ curl -fsSL https://oheco.github.io/oheco-packages/install.sh | zsh
 ```
 
 安装器依赖 `curl`、`tar`、`sha256sum`（或 `shasum`）及基础文件命令，不依赖 Go、Git
-或 jq。脚本会添加 zsh PATH 配置；重新打开终端，或按脚本输出设置当前终端的 PATH。
+或 jq。安装成功后，脚本自动把 `~/.oheco/bin` 添加到 `${ZDOTDIR:-$HOME}/.zshrc` 的 PATH
+配置；自定义 `OHECO_ROOT` 时写入对应的 `bin` 目录。保留原有配置，重复安装不重复写入。
+新开的 zsh 终端自动生效；当前终端执行 `source "${ZDOTDIR:-$HOME}/.zshrc"` 即可使用 `oo`，
+也可以按脚本输出直接设置 PATH。`curl | zsh` 的子进程无法直接修改当前终端的环境。
 `OHECO_NO_MODIFY_PATH=1` 可关闭配置文件修改。已有工具不会因索引同步失败被删除。
 
 ## 使用
 
 ```zsh
 oo update
-oo search
-oo info go
-oo install go
+oo search ohos-sdk
+oo info ohos-sdk-toolchains
+oo install ohos-sdk-toolchains
+binary-sign-tool@26.0.0.35-Beta -h
 oo list
-oo install go@1.27.1 --no-switch
-oo switch go 1.27.1
-go@1.27.1 version
-oo remove go@1.27.1
+oo switch ohos-sdk-toolchains 26.0.0.35-Beta
+oo remove ohos-sdk-toolchains@26.0.0.35-Beta
 oo install oheco
 ```
 
@@ -48,23 +50,25 @@ oo install oheco
 
 ```text
 ~/.oheco/
-  packages/oheco/0.1.0/bin/oo
-  packages/go/1.27.1/bin/{go,gofmt}
-  bin/oo@0.1.0 -> ../packages/oheco/0.1.0/bin/oo
-  bin/oo -> oo@0.1.0
-  bin/go@1.27.1 -> ../packages/go/1.27.1/bin/go
-  bin/go -> go@1.27.1
+  packages/oheco/0.2.0/bin/oo
+  packages/ohos-sdk-toolchains/26.0.0.35-Beta/lib/binary-sign-tool
+  packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
+  bin/oo@0.2.0 -> ../packages/oheco/0.2.0/bin/oo
+  bin/oo -> oo@0.2.0
+  bin/binary-sign-tool@26.0.0.35-Beta -> ../packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
+  bin/binary-sign-tool -> binary-sign-tool@26.0.0.35-Beta
   index/index.json
   state/installed.json
   state/lock
   state/transaction.json       # 仅事务进行中存在
-  cache/downloads/<sha256>.tar.gz
+  cache/downloads/<sha256>.{tar.gz,zip}
   tmp/
 ```
 
 本地安装记录保存每个版本的完整产物描述和命令映射。不同包提供相同命令、用户已有
 同名文件、用户修改过的链接都会导致操作停止；不会覆盖这些文件。
-下载必须通过大小和 SHA-256 校验；解压拒绝路径越界、硬链接和特殊文件。
+下载必须通过大小和 SHA-256 校验；支持 `tar.gz` 和 ZIP，ZIP 额外验证条目 CRC。
+解压保留执行权限，拒绝路径越界、硬链接、特殊文件、加密 ZIP 和重复条目。
 允许包内有效的相对软链接，禁止越界、循环及悬空软链接。
 单包解压上限 8 GiB / 250000 条目，索引上限 32 MiB。
 
@@ -87,16 +91,16 @@ build/oo --version
 ```
 
 `TMPDIR` 需按当前宿主应用的可写目录调整。构建脚本默认使用相邻 `go/bin/go`；
-`OHECO_VERSION` 默认 `0.1.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
+`OHECO_VERSION` 默认 `0.2.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
 签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 Linux 侧打包，不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.1.0
+python3 scripts/package.py --version 0.2.0
 ```
 
-输出 `dist/oheco-0.1.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
+输出 `dist/oheco-0.2.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
 包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
@@ -123,5 +127,48 @@ go run ./cmd/oo-index --verify-artifacts
 `oheco-packages` 中的 `oheco.json` 生成，不需要独立维护版本或哈希。
 
 第一版只安装预编译包，不执行包内安装脚本；跨包依赖求解、源码构建、自动升级和
-服务管理留待后续版本。Go 编译新程序时仍需要签名工具，cgo 还需要 OHOS LLVM/SDK；
-详见 Go 包自身的移植文档。
+服务管理留待后续版本。Go 适配尚未完成，当前未收录到软件索引。
+
+## ZIP、启动器与 SDK
+
+ZIP 安装使用 Go 标准库，无需外部解压程序。已在鸿蒙验证系统 `zip` 3.0 / `unzip` 6.0，
+以及解压后的签名程序执行。启动器依赖 `/bin/sh` 和支持 `-f` 的 `readlink`，宿主均已验证。
+
+ZIP 和 tar.gz 解压默认处理普通文件的大小写冲突：同一目录中仅文件名大小写不同的条目，
+保留全小写文件名对应的原始内容与执行权限，不受压缩包条目顺序或目标文件系统影响。
+没有冲突的文件保持原名；冲突中没有全小写候选、涉及目录或软链接时仍拒绝安装。
+完全同名的重复条目仍报错，被舍弃的文件也必须通过大小及 ZIP CRC 校验。
+
+包描述可添加 `launchers: ["ld.lld", "lld-link"]`。列表中的名称必须出现在 `binaries` 中。
+`oo` 在版本目录的 `.oo-launchers/` 中生成固定脚本，版本链接指向该脚本；脚本解析自身
+真实位置，调用原名二进制并原样传递参数，因此 `ld.lld@版本` 保持 LLD 的 Unix 链接器模式。
+启动器随安装事务提交、随版本卸载，支持离线切换和根目录迁移；安装或切换拒绝被修改的启动器。
+`.oo-launchers/` 是保留目录，软件包不能自行携带或引用它。包内安装脚本不会自动执行。
+
+SDK 按组件收录为 `ohos-sdk-native`、`ohos-sdk-toolchains`、`ohos-sdk-ets`、`ohos-sdk-js`、
+`ohos-sdk-previewer`，版本统一为 `26.0.0.35-Beta`。Previewer 当前只有元数据，允许
+`binaries: {}`。ETS/JS 暂按资源包安装，内置工具尚未验证在主目录中可执行，暂不创建命令链接。
+当前不支持 LLDB，也不创建 lldb-server 等相关链接。
+
+## 从 0.1.0 升级
+
+```zsh
+oo update
+oo install oheco
+oo update
+```
+
+新版默认读取 `index/v2/index.json`，并兼容已有 v1 本地索引和安装记录。发布站同时保留
+`index/v1/index.json`，只包含 v1 兼容包，包括最新的 oheco 自举包，让旧客户端完成升级。
+安装了 ZIP 或启动器包后应继续使用 0.2.0 或更新的客户端管理它们。
+
+SDK 原生验证脚本为 `scripts/test-sdk.zsh`，使用已校验的原始 ZIP 缓存，在隔离目录中测试
+编译、签名、版本链接及离线卸载。隔离目录默认位于主目录，可通过 `OHECO_SDK_TEST_PARENT`
+调整位置；同时核对 8 个小写头文件的名称和原包哈希。`scripts/test-native.zsh` 验证安装脚本、
+PATH 和旧客户端升级。
+
+SDK 的 native 原始 ZIP 含 8 对仅大小写不同且内容不同的 Linux netfilter 头文件。
+安装时按上述规则保留 8 个小写版本，舍弃对应的大写变体，以兼容鸿蒙主目录文件系统。
+因此需要大写变体中定义的代码仍需另行适配；Release ZIP 及其校验值保持不变。
+在含空格的安装路径下，可直接使用 `clang --target=aarch64-linux-ohos --sysroot=<native版本目录>/sysroot`；
+原包提供的 target shell 包装脚本没有完整引用路径，不适用于含空格的目录。

@@ -178,6 +178,9 @@ func stateLinks(s State) map[string]string {
 	for name, p := range s.Packages {
 		for version, r := range p.Versions {
 			for bin, rel := range r.Artifact.Binaries {
+				if r.Artifact.UsesLauncher(bin) {
+					rel = catalog.LauncherDirectory + "/" + bin
+				}
 				versioned := bin + "@" + version
 				links[versioned] = filepath.ToSlash(filepath.Join("..", "packages", name, version, filepath.FromSlash(rel)))
 				if p.Active == version {
