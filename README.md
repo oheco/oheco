@@ -1,6 +1,6 @@
 # oheco · oo
 
-鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。首版支持 HarmonyOS arm64。
+鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
 ## 安装
 
@@ -16,6 +16,17 @@ curl -fsSL https://oheco.github.io/oheco-packages/install.sh | zsh
 新开的 zsh 终端自动生效；当前终端执行 `source "${ZDOTDIR:-$HOME}/.zshrc"` 即可使用 `oo`，
 也可以按脚本输出直接设置 PATH。`curl | zsh` 的子进程无法直接修改当前终端的环境。
 `OHECO_NO_MODIFY_PATH=1` 可关闭配置文件修改。已有工具不会因索引同步失败被删除。
+
+使用自定义安装目录时，先在 `${ZDOTDIR:-$HOME}/.zshrc` 中添加以下配置，将示例目录
+替换为实际安装目录的绝对路径：
+
+```zsh
+export OHECO_ROOT="$HOME/tools/oheco"
+```
+
+执行 `source "${ZDOTDIR:-$HOME}/.zshrc"` 加载配置后，再运行上面的安装命令。
+安装器只自动配置 PATH，后续终端必须继续导出相同的 `OHECO_ROOT`；未设置时，
+`oo` 使用默认的 `~/.oheco`，不会根据可执行文件所在位置推断安装目录。
 
 ## 使用
 
@@ -52,6 +63,14 @@ oo install oheco
 - `recover` 恢复中断事务。其他修改命令启动时也会自动恢复。
 - `oheco` 自身作为普通包更新和切换；删除 `oheco` 的启用版本也会删除默认 `oo`
   链接，可通过保留的 `oo@版本` 或安装脚本恢复。
+
+`oo` 安装预编译包，不执行包内安装脚本。当前不提供跨包依赖自动解析与安装、源码构建、
+自动升级或服务管理。升级软件时先执行 `oo update`，再执行 `oo install <包名>`；
+升级包管理器使用 `oo update && oo install oheco`。
+
+软件目录已收录 Go 原生工具链，可通过 `oo install go` 安装。当前适配包版本为
+`1.27.1-ohos.1`；签名工具、cgo 依赖及宿主配置见
+[Go 适配说明](https://github.com/oheco/go/blob/go1.27.1-ohos.1/misc/harmony/README.md)。
 
 ## 目录和配置
 
@@ -97,17 +116,22 @@ oo install oheco
 ## 原生构建
 
 使用已经移植的 OHOS Go 工具链；官方 Go 发行版尚不支持 `GOOS=ohos`。
-Linux 工作区与鸿蒙共享源码。通过 `zshc` 连接宿主后：
+可通过 `oo install go` 和 `oo install ohos-sdk-toolchains` 安装 Go 和签名工具。
+在 HarmonyOS 原生 zsh 终端中进入本仓库，将以下示例路径替换为实际源码目录和
+当前应用的私有可写临时目录，并确认 PATH 中的 `go` 为 OHOS 原生工具链：
 
 ```zsh
-export TMPDIR=/data/storage/el2/base/haps/entry/files/go-tmp
+cd /path/to/oheco
+export TMPDIR="/path/to/app-private/go-tmp"
 mkdir -p "$TMPDIR"
-cd /storage/Users/currentUser/dev/ohos/oheco
-OHECO_GO=/storage/Users/currentUser/dev/ohos/go/bin/go sh scripts/build-ohos.sh
+go env GOHOSTOS GOHOSTARCH
+command -v binary-sign-tool
+OHECO_GO="$(command -v go)" sh scripts/build-ohos.sh
 build/oo --version
 ```
 
-`TMPDIR` 需按当前宿主应用的可写目录调整。构建脚本默认使用相邻 `go/bin/go`；
+`go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
+OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
 `OHECO_VERSION` 默认 `0.3.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
 签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
@@ -143,9 +167,6 @@ go run ./cmd/oo-index --verify-artifacts
 后一个命令会下载验证全部远端软件包，适用于发布。安装脚本从本仓库模板和
 `oheco-packages` 中的 `oheco.json` 生成，不需要独立维护版本或哈希。
 
-第一版只安装预编译包，不执行包内安装脚本；跨包依赖求解、源码构建、自动升级和
-服务管理留待后续版本。Go 适配尚未完成，当前未收录到软件索引。
-
 ## ZIP、启动器与 SDK
 
 ZIP 安装使用 Go 标准库，无需外部解压程序。已在鸿蒙验证系统 `zip` 3.0 / `unzip` 6.0，
@@ -164,7 +185,8 @@ ZIP 和 tar.gz 解压默认处理普通文件的大小写冲突：同一目录�
 
 SDK 按组件收录为 `ohos-sdk-native`、`ohos-sdk-toolchains`、`ohos-sdk-ets`、`ohos-sdk-js`、
 `ohos-sdk-previewer`，版本统一为 `26.0.0.35-Beta`。Previewer 当前只有元数据，允许
-`binaries: {}`。ETS/JS 暂按资源包安装，内置工具尚未验证在主目录中可执行，暂不创建命令链接。
+`binaries: {}`。ETS/JS 作为开发资源包提供，不创建编译器命令链接；完整应用构建
+需另行配置相应运行环境，内置编译工具的宿主执行验证情况见 [验证记录](docs/VALIDATION.md)。
 当前不支持 LLDB，也不创建 lldb-server 等相关链接。
 
 ## 从 0.1.0 升级

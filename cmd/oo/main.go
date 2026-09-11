@@ -29,7 +29,7 @@ Usage:
 
 install activates the selected version unless --no-switch is given.
 remove without a version removes the active version; --all removes every version.
-update refreshes metadata only. To update oo itself: oo install oheco
+update refreshes metadata only. To update oo itself: oo update && oo install oheco
 
 Environment:
   OHECO_ROOT        Installation root (default: ~/.oheco)
