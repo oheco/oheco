@@ -1,0 +1,73 @@
+#!/usr/bin/zsh
+# Generated from the validated oheco package descriptor. Requires zsh, curl, tar,
+# sha256sum (or shasum), and the usual mkdir/mktemp/chmod/rm/cat utilities.
+oo_install() {
+  emulate -L zsh
+  setopt ERR_EXIT NO_UNSET PIPE_FAIL
+  local oo_version=@@VERSION@@
+  local oo_url=@@URL@@
+  local oo_sha256=@@SHA256@@
+  local oo_root=${OHECO_ROOT:-$HOME/.oheco}
+  local oo_temp='' oo_actual oo_rc oo_marker='# oheco: command path'
+  local oo_bin_path oo_path_line oo_rc_content=''
+  if [[ $(uname -s) != HarmonyOS || $(uname -m) != (aarch64|arm64) ]]; then
+    print -u2 'oheco currently supports HarmonyOS arm64. Run this installer in the native host terminal.'
+    return 1
+  fi
+  local oo_tool
+  for oo_tool in curl tar mktemp chmod mkdir rm cat; do
+    command -v "$oo_tool" >/dev/null || { print -u2 "Required tool missing: $oo_tool"; return 1; }
+  done
+  if ! command -v sha256sum >/dev/null && ! command -v shasum >/dev/null; then
+    print -u2 'Required tool missing: sha256sum or shasum.'
+    return 1
+  fi
+  [[ $oo_root = /* ]] || oo_root="$PWD/$oo_root"
+  export OHECO_ROOT="$oo_root"
+  mkdir -p -- "$oo_root"
+  # zsh :A resolves symlinks without requiring readlink -f.
+  oo_root=${oo_root:A}
+  [[ $oo_root != / ]] || { print -u2 'OHECO_ROOT cannot be the filesystem root.'; return 1; }
+  export OHECO_ROOT="$oo_root"
+  oo_temp=$(mktemp -d "$oo_root/.bootstrap.XXXXXXXX")
+  {
+    print "Installing oheco $oo_version..."
+    curl --fail --location --show-error --retry 3 --connect-timeout 20 \
+      --proto '=https,http' --proto-redir '=https,http' \
+      "$oo_url" -o "$oo_temp/package.tar.gz"
+    if command -v sha256sum >/dev/null; then
+      oo_actual=$(sha256sum "$oo_temp/package.tar.gz")
+    else
+      oo_actual=$(shasum -a 256 "$oo_temp/package.tar.gz")
+    fi
+    oo_actual=${oo_actual%% *}
+    [[ $oo_actual = $oo_sha256 ]] || { print -u2 'Downloaded archive failed SHA-256 verification.'; return 1; }
+    mkdir "$oo_temp/unpacked"
+    tar -xzf "$oo_temp/package.tar.gz" -C "$oo_temp/unpacked"
+    chmod 755 "$oo_temp/unpacked/bin/oo"
+    cat > "$oo_temp/package.json" <<'OHECO_PACKAGE_MANIFEST'
+@@MANIFEST@@
+OHECO_PACKAGE_MANIFEST
+    "$oo_temp/unpacked/bin/oo" _bootstrap "$oo_temp/package.json" "$oo_temp/package.tar.gz" "$oo_version"
+    if ! "$oo_root/bin/oo" update; then
+      print -u2 'oo was installed; index download failed. Run oo update when the source is available.'
+    fi
+    oo_bin_path="$oo_root/bin"
+    oo_path_line="export PATH=${(q)oo_bin_path}:\$PATH"
+    if [[ ${OHECO_NO_MODIFY_PATH:-0} != 1 ]]; then
+      oo_rc="${ZDOTDIR:-$HOME}/.zshrc"
+      [[ -f $oo_rc ]] && oo_rc_content=$(<"$oo_rc")
+      if [[ $oo_rc_content != *"$oo_path_line"* ]]; then
+        mkdir -p -- "${oo_rc:h}"
+        print -rl -- '' "$oo_marker" "$oo_path_line" >> "$oo_rc"
+        print "Added PATH configuration to $oo_rc"
+      fi
+    fi
+    print 'Installed. Open a new terminal or run:'
+    print -r -- "  $oo_path_line"
+    print 'Then run: oo search'
+  } always {
+    [[ -n $oo_temp ]] && rm -rf -- "$oo_temp"
+  }
+}
+oo_install
