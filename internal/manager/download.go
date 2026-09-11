@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -51,82 +50,6 @@ func (m *Manager) get(ctx context.Context, address string) (*http.Response, erro
 	return resp, nil
 }
 
-func (m *Manager) Update(ctx context.Context) error {
-	return m.withLock(func() error {
-		update, err := m.fetchIndex(ctx)
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := atomicWrite(filepath.Join(m.Root, "index", "index.json"), update.data, 0644); err != nil {
-			return err
-		}
-		fmt.Fprintf(m.Out, "Updated index: %d packages (%s)\n", len(update.index.Packages), update.index.GeneratedAt)
-		return nil
-	})
-}
-
-// IndexUpdate is a validated snapshot from a background index check. Applying
-// it after confirmation avoids a second network request.
-type IndexUpdate struct {
-	data   []byte
-	index  catalog.Index
-	source string
-}
-
-func (m *Manager) fetchIndex(ctx context.Context) (*IndexUpdate, error) {
-	resp, err := m.get(ctx, m.IndexURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexSize+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxIndexSize {
-		return nil, fmt.Errorf("index exceeds 32 MiB")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	var idx catalog.Index
-	if err := catalog.Decode(bytes.NewReader(data), &idx); err != nil {
-		return nil, err
-	}
-	if err := idx.Validate(); err != nil {
-		return nil, err
-	}
-	return &IndexUpdate{data: data, index: idx, source: m.IndexURL}, nil
-}
-
-func (m *Manager) ApplyIndexUpdate(ctx context.Context, update *IndexUpdate) (bool, error) {
-	if update == nil || update.source != m.IndexURL {
-		return false, fmt.Errorf("index update does not belong to this source")
-	}
-	changed := false
-	err := m.withLock(func() error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		current, err := m.LoadIndex()
-		if err != nil {
-			return err
-		}
-		// Another command may have updated the index while the prompt was open.
-		if !indexChanged(current, update.index) {
-			return nil
-		}
-		if err := atomicWrite(filepath.Join(m.Root, "index", "index.json"), update.data, 0644); err != nil {
-			return err
-		}
-		changed = true
-		return nil
-	})
-	return changed, err
-}
 func (m *Manager) LoadIndex() (catalog.Index, error) {
 	var idx catalog.Index
 	err := readJSON(filepath.Join(m.Root, "index", "index.json"), &idx)

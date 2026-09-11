@@ -214,7 +214,9 @@ func (m *Manager) installLocked(ctx context.Context, name, version string, a cat
 	if name == "oheco" {
 		checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		output, err := exec.CommandContext(checkCtx, filepath.Join(stage, a.Binaries["oo"]), "--version").CombinedOutput()
+		check := exec.CommandContext(checkCtx, filepath.Join(stage, a.Binaries["oo"]), "--version")
+		check.Env = append(os.Environ(), "OHECO_NO_AUTO_UPDATE=1")
+		output, err := check.CombinedOutput()
 		if err != nil || !strings.HasPrefix(string(output), "oo "+version+" ") {
 			return fmt.Errorf("new oo failed version/startup check: %s (%v)", strings.TrimSpace(string(output)), err)
 		}
@@ -363,39 +365,12 @@ func (m *Manager) List() error {
 	return table.Flush()
 }
 
-func (m *Manager) Search(ctx context.Context, query string) (*IndexUpdate, error) {
-	checkCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	checked := make(chan *IndexUpdate, 1)
-	client := *m
-	go func() {
-		update, _ := client.fetchIndex(checkCtx)
-		// Buffered so a late response cannot strand the goroutine after timeout.
-		checked <- update
-	}()
+func (m *Manager) Search(ctx context.Context, query string) error {
 	idx, err := m.LoadIndex()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := m.searchLocal(ctx, idx, query); err != nil {
-		return nil, err
-	}
-	// The budget begins after local output is flushed, not when search starts.
-	timer := time.NewTimer(500 * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case update := <-checked:
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if update != nil && indexChanged(idx, update.index) {
-			return update, nil
-		}
-	case <-timer.C:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	return nil, nil
+	return m.searchLocal(ctx, idx, query)
 }
 
 func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query string) error {

@@ -1,10 +1,8 @@
 package manager
 
 import (
-	"reflect"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/oheco/oheco/internal/catalog"
 )
@@ -22,14 +20,6 @@ func maintainerNames(maintainers []catalog.Maintainer) string {
 		return "-"
 	}
 	return strings.Join(names, ", ")
-}
-
-func indexChanged(local, remote catalog.Index) bool {
-	localTime, _ := time.Parse(time.RFC3339, local.GeneratedAt)
-	remoteTime, _ := time.Parse(time.RFC3339, remote.GeneratedAt)
-	// Ignore stale CDN responses and rebuilds that only changed the timestamp.
-	return !remoteTime.Before(localTime) &&
-		(local.SchemaVersion != remote.SchemaVersion || !reflect.DeepEqual(local.Packages, remote.Packages))
 }
 
 func installedVersions(p InstalledPackage, platform string) []string {

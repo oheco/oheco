@@ -34,7 +34,7 @@ func TestSearchTable(t *testing.T) {
 	}
 	var out bytes.Buffer
 	f.m.Out = &out
-	if _, err := f.m.Search(context.Background(), ""); err != nil {
+	if err := f.m.Search(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
@@ -59,7 +59,7 @@ func TestSearchTable(t *testing.T) {
 	}
 	// Matching remains case-insensitive and includes command names.
 	out.Reset()
-	if _, err := f.m.Search(context.Background(), "LONG-TOOL"); err != nil {
+	if err := f.m.Search(context.Background(), "LONG-TOOL"); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "demo") || !strings.Contains(out.String(), "long-package-name") {
@@ -72,7 +72,7 @@ func TestSearchUnavailableAndNoMatches(t *testing.T) {
 	f.m.Platform = "other-arm64"
 	var out bytes.Buffer
 	f.m.Out = &out
-	if _, err := f.m.Search(context.Background(), "demo"); err != nil {
+	if err := f.m.Search(context.Background(), "demo"); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
@@ -85,7 +85,7 @@ func TestSearchUnavailableAndNoMatches(t *testing.T) {
 		t.Fatalf("unavailable package size = %q, want -", got)
 	}
 	out.Reset()
-	if _, err := f.m.Search(context.Background(), "no-such-package"); err != nil {
+	if err := f.m.Search(context.Background(), "no-such-package"); err != nil {
 		t.Fatal(err)
 	}
 	if got := out.String(); got != "No matching packages.\n" {

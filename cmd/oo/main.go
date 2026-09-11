@@ -12,13 +12,13 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.3.1"
+var version = "0.4.0"
 
 const help = `oo — the oheco package manager
 
 Usage:
   oo update                          Refresh the local package index
-  oo search [query]                   Search locally and check for index updates
+  oo search [query]                   Search the local package index
   oo info <package>                   Show available versions and package details
   oo install <package[@version]> [--no-switch]
   oo switch <package> <version>       Activate an installed version (offline)
@@ -30,16 +30,18 @@ Usage:
 install activates the selected version unless --no-switch is given.
 remove without a version removes the active version; --all removes every version.
 update refreshes metadata only. To update oo itself: oo update && oo install oheco
+Commands also refresh the index in the background without waiting.
 
 Environment:
   OHECO_ROOT        Installation root (default: ~/.oheco)
   OHECO_INDEX_URL   Index URL (default: official GitHub Pages index)
+  OHECO_NO_AUTO_UPDATE=1  Disable background index updates
 `
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, os.Args[1:]); err != nil {
+	if err := execute(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "oo:", err)
 		os.Exit(1)
 	}
@@ -69,7 +71,7 @@ func run(ctx context.Context, args []string) error {
 		if len(args) > 1 {
 			break
 		}
-		return search(ctx, m, strings.Join(args, ""), os.Stdin, terminal(os.Stdin) && terminal(os.Stdout))
+		return m.Search(ctx, strings.Join(args, ""))
 	case "info":
 		if len(args) != 1 {
 			break
