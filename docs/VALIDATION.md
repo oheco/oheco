@@ -65,11 +65,28 @@ fixture 只改写忽略目录内的索引 URL，不修改正式描述；使用�
 
 ## 发布边界
 
-本次验证使用本地源码和真实发行包，未推送仓库或发布 GitHub Releases / Pages。
-正式下载链接需在首次发布时启用。当前 GitHub 组织只有 `oheco`、`oheco-packages`
-两个仓库；Go 描述暂使用规划中的 `https://github.com/oheco/go`。
-2026-09-12，用户确认两个组件的移植维护者均为 Guo Wei (@kdada)，包描述已更新。
-首次发布还需准备 Go 适配仓库。
+首轮验证使用本地源码和真实发行包，公开下载入口在下述首次发布中启用。
+2026-09-12，用户确认两个组件的移植维护者均为 Guo Wei (@kdada)。
 
 通用 CI 使用官方 Go 1.23.x 运行平台无关逻辑；OHOS 产物必须使用移植工具链构建。
-本机验证使用 Go 1.27.1，不等同于已经执行远端 GitHub Actions。
+首轮本机验证使用 Go 1.27.1；随后执行的远端检查记录在下方。
+
+## 2026-09-12 · GitHub 首次发布
+
+- [oheco v0.1.0](https://github.com/oheco/oheco/releases/tag/v0.1.0) 已发布，
+  标签指向 `c053e754ad87b69d31a792790a1a14948ed8b57f`。
+- [Go v1.27.1](https://github.com/oheco/go/releases/tag/v1.27.1) 已发布，
+  标签指向源码快照 `e4baa69d468dce9939528693585fa0ce71a4cfcd`。
+  快照以发行包中的鸿蒙源码为准，已对照压缩包逐文件校验 15,669 个已暂存源码文件；
+  仓库 README 补充安装、移植说明和上游来源。
+- 两个 Release 的压缩包大小及 GitHub 返回的 SHA-256 与软件索引一致。
+- oheco 的 GitHub Actions 测试已通过，包括官方 Go 1.23.x 环境。
+- oheco-packages 已开启 GitHub Actions 类型的 Pages，HTTPS 已启用。
+- [Pages 工作流 34622788674](https://github.com/oheco/oheco-packages/actions/runs/34622788674)
+  构建和部署成功，其中包括两个正式软件包的下载与校验。
+- 已通过 HTTPS 验证[下载站](https://oheco.github.io/oheco-packages/)、
+  [安装脚本](https://oheco.github.io/oheco-packages/install.sh)和
+  [索引](https://oheco.github.io/oheco-packages/index/v1/index.json)可访问且内容正确。
+- 鸿蒙宿主已直接使用公开地址完成 `curl | zsh` 自举、默认源索引同步、Go 下载和安装、
+  Go 重定位、编译/签名/运行程序、版本切换及卸载。原始输出为 `build/public-host.log`。
+  测试在隔离的临时安装目录执行，结束后清理。

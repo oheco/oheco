@@ -4,7 +4,7 @@
 
 ## 安装
 
-首个 GitHub Release 和 Pages 发布后，在鸿蒙原生 zsh 终端执行：
+在鸿蒙原生 zsh 终端执行：
 
 ```zsh
 curl -fsSL https://oheco.github.io/oheco-packages/install.sh | zsh
