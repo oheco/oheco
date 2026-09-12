@@ -83,10 +83,29 @@ func (f File) Validate() error {
 	return nil
 }
 func (p Package) validateVersion(v Version) error {
+	if v.Artifacts != nil && len(v.Artifacts) == 0 {
+		return fmt.Errorf("artifacts must contain at least one platform when present")
+	}
+	if v.Projects != nil {
+		if p.SchemaVersion < 4 || p.Name == "oheco" {
+			return fmt.Errorf("projects require schema_version=4 and are not allowed in the oheco bootstrap package")
+		}
+		if len(v.Projects) == 0 {
+			return fmt.Errorf("projects must contain at least one named project")
+		}
+		for name, project := range v.Projects {
+			if !ValidComponent(name) {
+				return fmt.Errorf("invalid project name %q", name)
+			}
+			if err := project.Archive().Validate(); err != nil {
+				return fmt.Errorf("project %s: %w", name, err)
+			}
+		}
+	}
 	switch p.Manager() {
 	case "oheco":
-		if len(v.Artifacts) == 0 || v.PipArtifacts != nil || v.NpmArtifacts != nil {
-			return fmt.Errorf("native version requires only artifacts")
+		if (len(v.Artifacts) == 0 && len(v.Projects) == 0) || v.PipArtifacts != nil || v.NpmArtifacts != nil {
+			return fmt.Errorf("native version requires artifacts and/or projects, without pip_artifacts or npm_artifacts")
 		}
 	case "pip":
 		if v.Artifacts != nil || v.NpmArtifacts != nil || len(v.PipArtifacts) == 0 {

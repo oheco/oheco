@@ -140,16 +140,16 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.5.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
+`OHECO_VERSION` 默认 `0.6.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
 签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 Linux 侧打包，不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.5.0
+python3 scripts/package.py --version 0.6.0
 ```
 
-输出 `dist/oheco-0.5.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
+输出 `dist/oheco-0.6.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
 包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
@@ -205,8 +205,8 @@ oo install oheco
 oo update
 ```
 
-新版默认读取 `index/v3/index.json`，兼容已有 v1/v2 本地索引和安装记录。发布站同时保留
-`index/v1/index.json` 和 `index/v2/index.json`，分别只包含对应客户端可识别的包。最新的 oheco
+新版默认读取 `index/v4/index.json`，兼容已有 v1/v2/v3 本地索引和安装记录。发布站同时保留
+`index/v1/index.json`、`index/v2/index.json` 和 `index/v3/index.json`，分别只包含对应客户端可识别的包。最新的 oheco
 自举包仍使用 v1 描述，让旧客户端完成升级。
 安装了 ZIP 或启动器包后应继续使用 0.2.0 或更新的客户端管理它们。
 
@@ -226,7 +226,7 @@ SDK 的 native 原始 ZIP 含 8 对仅大小写不同且内容不同的 Linux ne
 0.5.0 增加 schema v3。包级 `package_manager` 选择 `oheco`、`pip` 或 `npm`，
 未设置时仍按原生包处理。`name` 是目录名称，语言包另设 `package_name`，例如
 `deepseek-harness` 对应 `@deepseek-ai/dsh`。原生版本保留 `artifacts`；Python 版本只使用
-`pip_artifacts` 数组；Node.js 版本只使用 `npm_artifacts` 对象。三者不能混用。
+`pip_artifacts` 数组；Node.js 版本只使用 `npm_artifacts` 对象。这三种安装产物不能混用；v4 的可选 `projects` 另见下方项目导出说明。
 
 ```zsh
 oo update
@@ -287,3 +287,45 @@ python3 scripts/test-language-native.py --proxy socks5://172.16.105.2:10808 \
 Linux/鸿蒙共享检出若触发 Git 所有权检查，构建时可仅给该进程设置
 `GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=safe.directory` 和
 `GIT_CONFIG_VALUE_0=<宿主源码绝对路径>`，无需修改全局 Git 配置。
+
+## DevEco 项目导出
+
+0.6.0 增加 schema v4 和 `oo export`。每个版本可以在 `artifacts` 之外提供
+`projects`，也可以只提供项目。项目是可编辑的 DevEco 工程归档，可包含 ArkTS/C++
+外壳、编译好的 `.so`、运行资源和离线依赖；用户导出后用 DevEco 自行构建、签名和安装。
+
+```zsh
+oo update
+oo info godot-editor
+oo export godot-editor --output ./GodotEditor
+# 指定版本和项目名：
+oo export godot-editor@4.7.2-ohos.1 editor -o './Godot Editor'
+# 导出到当前目录：
+mkdir my-editor
+cd my-editor
+oo export godot-editor
+```
+
+`oo export <包名[@版本]> [项目名] [-o|--output 目录]`：只有一个项目时可省略项目名；
+多个项目时列出名称并要求选择。目标目录默认当前目录，缺失的目录会创建。
+版本默认取当前平台的 `latest`；在其他开发宿主导出时，如果所有 `latest` 条目指向
+同一版本，也可直接使用默认版本；若它们不同，需要显式指定 `@版本`。
+
+导出沿用代理、进度、大小/SHA-256 校验和下载缓存。完整解压验证后才写入目标目录；
+现有顶层文件或目录重名时拒绝导出，不合并已有目录，其他文件保持原样。文件使用排他创建，
+不覆盖已有内容。Ctrl+C 取消时清理本次新建的输出；强制终止或断电可能留下部分导出内容，
+可保留所需文件并选择新目录重试。ZIP 和 tar.gz 都支持，保留执行权限及有效的包内相对软链接。
+项目中的大小写冲突直接报错，不使用 SDK 安装时保留小写变体的规则，以免丢失源码。
+
+导出不执行项目代码，不调用 DevEco 或签名工具，也不创建安装记录或命令链接。
+导出的目录由用户维护，`oo remove` 不管理它；下载缓存仍保留在 `OHECO_ROOT` 内。
+只提供项目的版本使用 `oo install` 时会提示改用 `oo export`。
+
+`projects` 是项目名到归档描述的映射，字段包括 `url`、`sha256`、`size`、`format`、
+`strip_components` 和可选 `description`，不声明 `binaries` 或 `launchers`。
+`strip_components: 1` 表示移除归档的一层根目录，直接把工程内容写入指定目录。
+v4 的 pip/npm 版本也可额外提供项目，其语言产物仍按原有规则安装。
+`oo search`、`oo info` 和软件目录网站会显示项目及导出入口。
+
+首个项目包是实验性的 `godot-editor`；应用验收范围与未验证项见其 `oo info`、
+项目内 `VALIDATION.md` 和 Release。包管理器成功导出不代表 HAP 已完成运行验收。

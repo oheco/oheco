@@ -47,7 +47,11 @@ func archivePath(name string, strip int) (string, error) {
 }
 
 func extract(ctx context.Context, filename, destination string, a catalog.Artifact) error {
-	x := archiveExtractor{ctx: ctx, destination: destination, strip: a.StripComponents, seen: map[string]bool{}, links: map[string]string{}}
+	return extractArchive(ctx, filename, destination, a, false)
+}
+
+func extractArchive(ctx context.Context, filename, destination string, a catalog.Artifact, project bool) error {
+	x := archiveExtractor{ctx: ctx, destination: destination, strip: a.StripComponents, project: project, seen: map[string]bool{}, links: map[string]string{}}
 	var err error
 	switch a.Format {
 	case "tar.gz":
@@ -70,6 +74,7 @@ type archiveExtractor struct {
 	ctx         context.Context
 	destination string
 	strip       int
+	project     bool
 	seen        map[string]bool
 	links       map[string]string
 	nodes       map[string]archiveNode
@@ -98,6 +103,9 @@ func (x *archiveExtractor) claimPath(rel string, kind os.FileMode) (bool, error)
 	}
 	if previous.name == rel && previous.kind == os.ModeDir && kind == os.ModeDir {
 		return true, nil // An explicit directory may follow an implicit parent.
+	}
+	if x.project {
+		return false, fmt.Errorf("project archive has conflicting paths %q and %q", previous.name, rel)
 	}
 	if previous.kind != 0 || kind != 0 || path.Dir(previous.name) != path.Dir(rel) {
 		return false, fmt.Errorf("conflicting archive paths %q and %q (only regular filenames may differ in case)", previous.name, rel)
@@ -255,7 +263,7 @@ func (x *archiveExtractor) add(name string, mode os.FileMode, size int64, link s
 		}
 		return nil
 	}
-	if strings.EqualFold(strings.Split(rel, "/")[0], catalog.LauncherDirectory) {
+	if !x.project && strings.EqualFold(strings.Split(rel, "/")[0], catalog.LauncherDirectory) {
 		return fmt.Errorf("archive uses reserved launcher directory: %s", rel)
 	}
 	if x.seen[rel] {
@@ -300,7 +308,7 @@ func (x *archiveExtractor) add(name string, mode os.FileMode, size int64, link s
 			return fmt.Errorf("unsafe archive symlink %q", name)
 		}
 		resolved := path.Clean(path.Join(path.Dir(rel), link))
-		if !catalog.SafePath(resolved) || strings.EqualFold(strings.Split(resolved, "/")[0], catalog.LauncherDirectory) {
+		if !catalog.SafePath(resolved) || (!x.project && strings.EqualFold(strings.Split(resolved, "/")[0], catalog.LauncherDirectory)) {
 			return fmt.Errorf("archive symlink escapes package or targets reserved directory: %s", rel)
 		}
 		x.links[rel] = link

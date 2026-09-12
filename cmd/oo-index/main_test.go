@@ -20,12 +20,16 @@ func TestPublishedIndexesKeepV1UpgradePath(t *testing.T) {
 	a.Binaries = map[string]string{}
 	data.Versions = []catalog.Version{{Version: "26-Beta", Artifacts: map[string]catalog.Artifact{"ohos-arm64": a}}}
 	data.Latest = map[string]string{"ohos-arm64": "26-Beta"}
-	idx := catalog.Index{SchemaVersion: 2, GeneratedAt: "2026-09-12T00:00:00Z", Packages: []catalog.Package{p, data}}
+	project := data
+	project.Name = "editor"
+	project.SchemaVersion = 4
+	project.Versions = []catalog.Version{{Version: "26-Beta", Projects: map[string]catalog.Project{"editor": {URL: a.URL, SHA256: a.SHA256, Size: a.Size, Format: "zip"}}}}
+	idx := catalog.Index{SchemaVersion: 4, GeneratedAt: "2026-09-12T00:00:00Z", Packages: []catalog.Package{p, data, project}}
 	dir := t.TempDir()
 	if err := writeIndexes(dir, idx); err != nil {
 		t.Fatal(err)
 	}
-	for version, count := range map[string]int{"v1": 1, "v2": 2} {
+	for version, count := range map[string]int{"v1": 1, "v2": 2, "v3": 2, "v4": 3} {
 		b, err := os.ReadFile(filepath.Join(dir, "index", version, "index.json"))
 		if err != nil {
 			t.Fatal(err)

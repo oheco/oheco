@@ -401,6 +401,9 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 		}
 		text := p.Name + " " + p.PackageName + " " + p.Description
 		for _, v := range p.Versions {
+			for name, project := range v.Projects {
+				text += " " + name + " " + project.Description
+			}
 			for _, a := range v.Artifacts {
 				for bin := range a.Binaries {
 					text += " " + bin
@@ -409,15 +412,27 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 		}
 		if strings.Contains(strings.ToLower(text), query) {
 			latest := p.Latest[m.Platform]
+			projectVersion, projectErr := p.ProjectVersion("", m.Platform)
+			if latest == "" && projectErr == nil && len(projectVersion.Projects) > 0 {
+				latest = projectVersion.Version
+			}
 			size := "-"
 			if latest == "" {
 				latest = "unavailable for " + m.Platform
 			} else if p.Manager() == "oheco" {
 				_, a, err := p.Resolve(latest, m.Platform)
-				if err != nil {
+				if err != nil && (projectErr != nil || len(projectVersion.Projects) == 0) {
 					return err
 				}
-				size = byteSize(float64(a.Size))
+				if err == nil {
+					size = byteSize(float64(a.Size))
+				} else {
+					var total int64
+					for _, project := range projectVersion.Projects {
+						total += project.Size
+					}
+					size = byteSize(float64(total)) + " (projects)"
+				}
 			}
 			if count == 0 {
 				fmt.Fprintln(table, "NAME\tLATEST\tINSTALLED\tSIZE\tMAINTAINERS\tDESCRIPTION")
@@ -471,6 +486,13 @@ func (m *Manager) Info(name string) error {
 		fmt.Fprintf(m.Out, "Maintainer: @%s %s\n", who.GitHub, who.Name)
 	}
 	for _, v := range p.Versions {
+		for _, name := range v.ProjectNames() {
+			project := v.Projects[name]
+			fmt.Fprintf(m.Out, "%s project %s (%s)\n  oo export %s@%s %s\n  %s\n", v.Version, name, byteSize(float64(project.Size)), p.Name, v.Version, name, project.URL)
+			if project.Description != "" {
+				fmt.Fprintf(m.Out, "  %s\n", project.Description)
+			}
+		}
 		if a, ok := v.Artifacts[m.Platform]; ok {
 			marker := ""
 			if p.Latest[m.Platform] == v.Version {

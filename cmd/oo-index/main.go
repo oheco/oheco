@@ -78,6 +78,12 @@ func run() error {
 		client := manager.HTTPClient()
 		for _, p := range idx.Packages {
 			for _, v := range p.Versions {
+				for _, name := range v.ProjectNames() {
+					fmt.Printf("Verifying %s@%s project %s\n", p.Name, v.Version, name)
+					if err := verifyProject(client, v.Projects[name]); err != nil {
+						return err
+					}
+				}
 				for _, a := range v.PipArtifacts {
 					if err := verifyLanguage(client, "pip", a.File, a); err != nil {
 						return err

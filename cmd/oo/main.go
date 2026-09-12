@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.5.0"
+var version = "0.6.0"
 
 const help = `oo — the oheco package manager
 
@@ -21,6 +21,7 @@ Usage:
   oo search [query]                   Search the local package index
   oo info <package>                   Show available versions and package details
   oo install <package[@version]> [--no-switch]
+  oo export <package[@version]> [project] [-o|--output directory]
   oo switch <package> <version>       Activate an installed version (offline)
   oo remove <package[@version]> [--all]
   oo list                            List installed versions (* = active)
@@ -30,6 +31,9 @@ Usage:
   oo --version
 
 install activates the selected version unless --no-switch is given.
+export writes an editable project into the current directory by default.
+The project name is optional when the version provides exactly one project.
+Existing files and directories are not overwritten; export does not install.
 remove without a version removes the active version; --all removes every version.
 update refreshes metadata only. To update oo itself: oo update && oo install oheco
 Commands also refresh the index in the background without waiting.
@@ -69,6 +73,12 @@ func run(ctx context.Context, args []string) error {
 	}
 	command, args := args[0], args[1:]
 	switch command {
+	case "export":
+		spec, project, destination, err := exportArgs(args)
+		if err != nil {
+			return err
+		}
+		return m.Export(ctx, spec, project, destination)
 	case "pip", "npm":
 		return m.Language(ctx, command, args)
 	case "update":
