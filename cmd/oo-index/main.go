@@ -30,9 +30,21 @@ func run() error {
 	site := flag.String("site", "../oheco-packages/site", "static website directory")
 	template := flag.String("installer-template", "scripts/install.sh.tmpl", "zsh installer template")
 	verify := flag.Bool("verify-artifacts", false, "download artifacts and verify their hashes before publishing")
+	inspect := flag.String("inspect", "", "read language artifact metadata from a local wheel or npm tarball")
+	packageManager := flag.String("package-manager", "", "pip or npm for --inspect")
+	artifactURL := flag.String("url", "", "immutable download URL for --inspect")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments")
+	}
+	if *inspect != "" {
+		a, err := catalog.Inspect(*packageManager, *inspect, *artifactURL)
+		if err != nil {
+			return err
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(a)
 	}
 	files, err := filepath.Glob(filepath.Join(*directory, "*.json"))
 	if err != nil {
@@ -66,6 +78,16 @@ func run() error {
 		client := manager.HTTPClient()
 		for _, p := range idx.Packages {
 			for _, v := range p.Versions {
+				for _, a := range v.PipArtifacts {
+					if err := verifyLanguage(client, "pip", a.File, a); err != nil {
+						return err
+					}
+				}
+				if a := v.NpmArtifacts; a != nil {
+					if err := verifyLanguage(client, "npm", a.File, *a); err != nil {
+						return err
+					}
+				}
 				for platform, a := range v.Artifacts {
 					fmt.Printf("Verifying %s@%s %s\n", p.Name, v.Version, platform)
 					resp, err := client.Get(a.URL)
@@ -147,7 +169,8 @@ func run() error {
 }
 
 func writeIndexes(output string, idx catalog.Index) error {
-	for _, index := range []catalog.Index{idx, idx.Legacy()} {
+	for schema := 1; schema <= idx.SchemaVersion; schema++ {
+		index := idx.Compatible(schema)
 		if err := index.Validate(); err != nil {
 			return err
 		}

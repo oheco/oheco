@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)
-version=${OHECO_VERSION:-0.4.0}
+version=${OHECO_VERSION:-0.5.0}
 go_bin=${OHECO_GO:-$root/../go/bin/go}
 if ! command -v binary-sign-tool >/dev/null 2>&1; then
   echo 'binary-sign-tool is missing; check the LLVM tool directory in PATH.' >&2

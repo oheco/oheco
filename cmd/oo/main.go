@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.4.0"
+var version = "0.5.0"
 
 const help = `oo — the oheco package manager
 
@@ -25,17 +25,24 @@ Usage:
   oo remove <package[@version]> [--all]
   oo list                            List installed versions (* = active)
   oo recover                         Recover an interrupted operation
+  oo pip <command> [arguments]        Run pip through oo's temporary source
+  oo npm <command> [arguments]        Run npm through oo's temporary registry
   oo --version
 
 install activates the selected version unless --no-switch is given.
 remove without a version removes the active version; --all removes every version.
 update refreshes metadata only. To update oo itself: oo update && oo install oheco
 Commands also refresh the index in the background without waiting.
+Language packages install into the current Python environment or npm project.
+Use oo npm install <name> --global for global npm commands. pip/npm own removal
+and installed-package listings; native switch/versioned links do not apply.
+Only wheels and prebuilt npm packages are supported; npm scripts are disabled.
 
 Environment:
   OHECO_ROOT        Installation root (default: ~/.oheco)
   OHECO_INDEX_URL   Index URL (default: official GitHub Pages index)
   OHECO_NO_AUTO_UPDATE=1  Disable background index updates
+  OHECO_PYTHON      Python executable for oo pip (default: python3 from PATH)
 `
 
 func main() {
@@ -62,6 +69,8 @@ func run(ctx context.Context, args []string) error {
 	}
 	command, args := args[0], args[1:]
 	switch command {
+	case "pip", "npm":
+		return m.Language(ctx, command, args)
 	case "update":
 		if len(args) != 0 {
 			break

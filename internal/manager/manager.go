@@ -109,6 +109,20 @@ func (m *Manager) Install(ctx context.Context, spec string, noSwitch bool) error
 		if err != nil {
 			return err
 		}
+		if p.Manager() != "oheco" {
+			if noSwitch {
+				return fmt.Errorf("--no-switch is only supported for native packages")
+			}
+			v, err := p.LanguageVersion(version, m.Platform)
+			if err != nil {
+				return err
+			}
+			separator := "@"
+			if p.Manager() == "pip" {
+				separator = "=="
+			}
+			return m.languageLocked(ctx, idx, p.Manager(), []string{"install", p.PackageName + separator + v.Version})
+		}
 		version, a, err := p.Resolve(version, m.Platform)
 		if err != nil {
 			return err
@@ -385,7 +399,7 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		text := p.Name + " " + p.Description
+		text := p.Name + " " + p.PackageName + " " + p.Description
 		for _, v := range p.Versions {
 			for _, a := range v.Artifacts {
 				for bin := range a.Binaries {
@@ -398,7 +412,7 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 			size := "-"
 			if latest == "" {
 				latest = "unavailable for " + m.Platform
-			} else {
+			} else if p.Manager() == "oheco" {
 				_, a, err := p.Resolve(latest, m.Platform)
 				if err != nil {
 					return err
@@ -437,6 +451,22 @@ func (m *Manager) Info(name string) error {
 		return err
 	}
 	fmt.Fprintf(m.Out, "%s — %s\nUpstream: %s\nPort: %s\nLicense: %s\n", p.Name, p.Description, p.Upstream, p.Repository, p.License)
+	if p.Manager() != "oheco" {
+		fmt.Fprintf(m.Out, "Package manager: %s\nPackage name: %s\n", p.Manager(), p.PackageName)
+		for _, v := range p.Versions {
+			fmt.Fprintf(m.Out, "%s", v.Version)
+			if p.Latest[m.Platform] == v.Version {
+				fmt.Fprint(m.Out, " (latest)")
+			}
+			fmt.Fprintln(m.Out)
+			for _, a := range v.PipArtifacts {
+				fmt.Fprintf(m.Out, "  %s\n", a.Filename)
+			}
+			if v.NpmArtifacts != nil {
+				fmt.Fprintf(m.Out, "  %s\n", v.NpmArtifacts.Filename)
+			}
+		}
+	}
 	for _, who := range p.Maintainers {
 		fmt.Fprintf(m.Out, "Maintainer: @%s %s\n", who.GitHub, who.Name)
 	}
