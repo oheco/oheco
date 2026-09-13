@@ -21,7 +21,7 @@ CANONICAL = "https://oheco.org"
 LEGACY = "https://oheco.github.io/oheco-packages"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--oo", type=Path, default=Path(__file__).resolve().parent.parent / "build/oo")
-parser.add_argument("--version", default="0.7.1")
+parser.add_argument("--version", default="0.8.0")
 parser.add_argument("--published", action="store_true")
 args = parser.parse_args()
 if sys.platform != "ohos":

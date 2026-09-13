@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -569,7 +570,28 @@ func languageNeedsRegistry(backend, command string) bool {
 	return command == "install" || (backend == "npm" && (command == "ci" || command == "view" || command == "outdated"))
 }
 
-func languageCommand(tool languageToolchain, command string, targets, args []string, defaultGlobal bool, registryURL, config string) []string {
+// scopes lists the npm scopes oo serves from its own catalog, so adapted
+// scoped packages always come from oo even when the user configured an
+// override for that scope; other names in those scopes are forwarded on.
+func catalogScopes(idx catalog.Index) []string {
+	seen := map[string]bool{}
+	var scopes []string
+	for _, p := range idx.Packages {
+		if p.Manager() != "npm" || !strings.HasPrefix(p.PackageName, "@") {
+			continue
+		}
+		scope, _, ok := strings.Cut(p.PackageName, "/")
+		if !ok || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		scopes = append(scopes, scope)
+	}
+	sort.Strings(scopes)
+	return scopes
+}
+
+func languageCommand(tool languageToolchain, command string, targets, args []string, defaultGlobal bool, registryURL string, scopes []string) []string {
 	var argv []string
 	if tool.backend == "pip" {
 		argv = []string{"-B", "-m", "pip"}
@@ -584,9 +606,14 @@ func languageCommand(tool languageToolchain, command string, targets, args []str
 	argv = append(argv, targets...)
 	argv = append(argv, args...)
 	if tool.backend == "npm" {
-		argv = append(argv, "--userconfig="+config, "--globalconfig="+os.DevNull, "--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--omit-lockfile-registry-resolved", "--fetch-retries=0")
+		// The user's own npmrc is honoured now; only verification-independent
+		// policy stays forced here.
+		argv = append(argv, "--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--omit-lockfile-registry-resolved", "--fetch-retries=0")
 		if registryURL != "" {
 			argv = append(argv, "--registry="+registryURL+"/npm/")
+			for _, scope := range scopes {
+				argv = append(argv, "--"+scope+":registry="+registryURL+"/npm/")
+			}
 		} else {
 			// Uninstall can otherwise fetch metadata while rebuilding local trees.
 			argv = append(argv, "--offline")
@@ -605,7 +632,7 @@ func (m *Manager) printLanguageCommand(tool languageToolchain, command string, t
 	if languageNeedsRegistry(tool.backend, command) {
 		url = "<temporary-verified-registry>"
 	}
-	argv := append([]string{tool.program}, languageCommand(tool, command, targets, args, defaultGlobal, url, "<temporary-empty-npmrc>")...)
+	argv := append([]string{tool.program}, languageCommand(tool, command, targets, args, defaultGlobal, url, nil)...)
 	fmt.Fprintf(m.Out, "Backend argv: %q\n", argv)
 }
 
@@ -619,30 +646,34 @@ func (m *Manager) runLanguage(ctx context.Context, idx catalog.Index, tool langu
 		}
 	}
 	url := ""
+	var scopes []string
 	if languageNeedsRegistry(tool.backend, command) {
-		s, err := registry.Start(ctx, registry.Config{Index: idx, Platform: m.Platform, Cache: filepath.Join(m.Root, "cache", "language"), Client: m.Client})
+		cfg := registry.Config{Index: idx, Platform: m.Platform, Client: m.Client}
+		switch tool.backend {
+		case "npm":
+			upstream, err := m.npmUpstream(ctx, tool)
+			if err != nil {
+				return err
+			}
+			cfg.NpmRegistry, cfg.NpmScoped = upstream.Registry, upstream.Scoped
+			m.describeAnonymousUpstream("npm", upstream.Auth)
+		case "pip":
+			upstream, err := m.pipUpstream(ctx, tool)
+			if err != nil {
+				return err
+			}
+			cfg.PipIndexes = upstream.Indexes
+			m.describeAnonymousUpstream("pip", upstream.Auth)
+		}
+		s, err := registry.Start(ctx, cfg)
 		if err != nil {
 			return err
 		}
 		defer s.Close()
 		url = s.URL
+		scopes = catalogScopes(idx)
 	}
-	config := ""
-	if tool.backend == "npm" {
-		if err := os.MkdirAll(filepath.Join(m.Root, "tmp"), 0755); err != nil {
-			return err
-		}
-		file, err := os.CreateTemp(filepath.Join(m.Root, "tmp"), "npmrc-*")
-		if err != nil {
-			return err
-		}
-		config = file.Name()
-		defer os.Remove(config)
-		if err := file.Close(); err != nil {
-			return err
-		}
-	}
-	cmd := exec.CommandContext(ctx, tool.program, languageCommand(tool, command, targets, args, defaultGlobal, url, config)...)
+	cmd := exec.CommandContext(ctx, tool.program, languageCommand(tool, command, targets, args, defaultGlobal, url, scopes)...)
 	cmd.Env = tool.env
 	cmd.Stdin = m.In
 	cmd.Stdout, cmd.Stderr = m.Out, m.Out

@@ -103,11 +103,15 @@ func TestLanguagePipResolvesWheelDependenciesInIsolatedTarget(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	rootBytes := languageWheel(t, "oo_language_root", "oo-language-dep==1.0.0")
 	depBytes := languageWheel(t, "oo_language_dep", "")
+	// pip derives the candidate wheel name from the link URL's basename, so the
+	// catalog artifact URL must end in the real wheel filename.
+	rootFilename := "oo_language_root-1.0.0-py3-none-any.whl"
+	depFilename := "oo_language_dep-1.0.0-py3-none-any.whl"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/root.whl":
+		case "/" + rootFilename:
 			w.Write(rootBytes)
-		case "/dep.whl":
+		case "/" + depFilename:
 			w.Write(depBytes)
 		default:
 			t.Errorf("unexpected artifact request %s", r.URL.Path)
@@ -131,12 +135,13 @@ func TestLanguagePipResolvesWheelDependenciesInIsolatedTarget(t *testing.T) {
 	})}
 	idx := languageTestIndex()
 	for i, name := range []string{"oo-language-root", "oo-language-dep"} {
-		data, address := rootBytes, server.URL+"/root.whl"
+		data, filename := rootBytes, rootFilename
 		if i == 1 {
-			data, address = depBytes, server.URL+"/dep.whl"
+			data, filename = depBytes, depFilename
 		}
+		address := server.URL + "/" + filename
 		a := artifact(data, address, nil)
-		wheel := catalog.PipArtifact{File: catalog.File{URL: address, SHA256: a.SHA256, Size: a.Size, Filename: strings.ReplaceAll(name, "-", "_") + "-1.0.0-py3-none-any.whl"}, RequiresPython: ">=3.8"}
+		wheel := catalog.PipArtifact{File: catalog.File{URL: address, SHA256: a.SHA256, Size: a.Size, Filename: filename}, RequiresPython: ">=3.8"}
 		if i == 0 {
 			wheel.RequiresDist = []string{"oo-language-dep==1.0.0"}
 		}
@@ -194,13 +199,20 @@ func TestLanguageRejectsRegistryBypasses(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
+	// Registry settings are honoured and forwarded now, so a scoped external
+	// registry in the project .npmrc is accepted rather than rejected.
 	os.WriteFile(filepath.Join(dir, ".npmrc"), []byte("@scope:registry=https://example.com\n"), 0600)
-	if checkNpmProject(dir) == nil {
-		t.Fatal("accepted scoped external registry")
+	if err := checkNpmProject(dir); err != nil {
+		t.Fatalf("rejected forwarded scoped registry: %v", err)
 	}
 	os.Remove(filepath.Join(dir, ".npmrc"))
+	// lockfile sources must be HTTPS; plaintext stays unusable even on loopback.
 	os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"packages":{"node_modules/foo":{"resolved":"http://127.0.0.1:9999/foo.tgz"}}}`), 0600)
-	if checkNpmProject(dir) == nil {
-		t.Fatal("accepted stale temporary registry")
+	if err := checkNpmProject(dir); err == nil || !strings.Contains(err.Error(), "unusable source URL") {
+		t.Fatalf("accepted stale temporary registry: %v", err)
+	}
+	os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"packages":{"node_modules/foo":{"resolved":"https://registry.npmjs.org/foo/-/foo-1.0.0.tgz"}}}`), 0600)
+	if err := checkNpmProject(dir); err != nil {
+		t.Fatalf("rejected https lockfile source: %v", err)
 	}
 }

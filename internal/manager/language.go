@@ -61,20 +61,30 @@ func validateLanguageArgs(backend string, args []string) error {
 	return nil
 }
 
+// languageEnv keeps the caller's package-manager configuration and proxy:
+// oo no longer owns the download path, so npm/pip talk directly to the sources
+// the user configured. Only options that can inject code into the tool itself
+// are dropped, and loopback must bypass any proxy for oo's temporary source.
 func languageEnv(backend string) []string {
 	var env []string
+	bypass := "127.0.0.1,localhost"
 	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
+		key, value, _ := strings.Cut(entry, "=")
 		upper := strings.ToUpper(key)
-		if strings.HasPrefix(upper, "NPM_CONFIG_") || strings.HasPrefix(upper, "PIP_") || upper == "HTTP_PROXY" || upper == "HTTPS_PROXY" || upper == "ALL_PROXY" || upper == "NO_PROXY" || upper == "NODE_OPTIONS" {
+		if upper == "NODE_OPTIONS" {
+			continue
+		}
+		if upper == "NO_PROXY" {
+			if strings.TrimSpace(value) != "" {
+				bypass += "," + value
+			}
 			continue
 		}
 		env = append(env, entry)
 	}
-	// oo's HTTP client retains the caller's proxy; children only use loopback.
-	env = append(env, "NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost")
+	env = append(env, "NO_PROXY="+bypass, "no_proxy="+bypass)
 	if backend == "pip" {
-		env = append(env, "PIP_CONFIG_FILE="+os.DevNull, "PIP_DISABLE_PIP_VERSION_CHECK=1")
+		env = append(env, "PIP_DISABLE_PIP_VERSION_CHECK=1")
 	}
 	return env
 }
@@ -95,7 +105,9 @@ func (m *Manager) languageLocked(ctx context.Context, idx catalog.Index, backend
 }
 
 func checkNpmProject(dir string) error {
-	// A project .npmrc can override scoped registries even with --registry.
+	// Registry and proxy settings are now honoured and forwarded, so they are
+	// no longer rejected. Only options that can execute code inside npm itself
+	// remain blocked.
 	config, err := os.ReadFile(filepath.Join(dir, ".npmrc"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -107,8 +119,9 @@ func checkNpmProject(dir string) error {
 		}
 		key, _, _ := strings.Cut(line, "=")
 		key = strings.TrimSpace(strings.ToLower(key))
-		if strings.Contains(key, "registry") || strings.Contains(key, "proxy") || strings.Contains(key, "config") {
-			return fmt.Errorf("project .npmrc setting %q can bypass oo; remove it for this installation", key)
+		switch key {
+		case "node-options", "script-shell", "onload-script":
+			return fmt.Errorf("project .npmrc setting %q can execute code inside npm; remove it for this installation", key)
 		}
 	}
 	for _, name := range []string{"package.json", "package-lock.json", "npm-shrinkwrap.json"} {
@@ -142,12 +155,19 @@ func checkNpmProject(dir string) error {
 }
 
 func checkLockURLs(value any) error {
+	// Any HTTPS source is acceptable now that oo forwards to the user's own
+	// registry; only plaintext or malformed origins are rejected.
 	switch v := value.(type) {
 	case map[string]any:
 		for key, item := range v {
 			if key == "resolved" {
-				if address, ok := item.(string); ok && !strings.HasPrefix(address, "https://registry.npmjs.org/") {
-					return fmt.Errorf("lockfile contains a custom URL; regenerate it with oo npm install")
+				if address, ok := item.(string); ok {
+					// Any HTTPS source is acceptable now that oo forwards to the
+					// user's own registry, but plaintext or loopback URLs are a
+					// leftover from the old proxy model and cannot work.
+					if err := catalog.ValidateURL(address); err != nil || !strings.HasPrefix(address, "https://") {
+						return fmt.Errorf("lockfile contains an unusable source URL; regenerate it with oo npm install")
+					}
 				}
 			}
 			if err := checkLockURLs(item); err != nil {

@@ -310,6 +310,7 @@ func TestLanguageDependenciesRemainBackendMetadata(t *testing.T) {
 			v.NpmArtifacts = &NpmArtifact{File: f, PackageJSON: json.RawMessage(`{"name":"language","version":"1.0.0","dependencies":{"backend-only":"^2"}}`)}
 		} else {
 			f.Filename = "language-1.0.0-py3-none-any.whl"
+			f.URL = "https://example.com/" + f.Filename
 			v.PipArtifacts = []PipArtifact{{File: f, RequiresDist: []string{"backend-only>=2"}}}
 		}
 		p.Versions = []Version{v}

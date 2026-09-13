@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -125,6 +126,13 @@ func (p Package) validateVersion(v Version) error {
 			}
 			if seen[a.Filename] {
 				return fmt.Errorf("duplicate wheel %s", a.Filename)
+			}
+			// pip derives the distribution filename from the URL's last path
+			// segment on an HTML index, so a mismatched URL would be silently
+			// skipped as an invalid wheel at install time.
+			parsed, err := url.Parse(a.URL)
+			if err != nil || path.Base(parsed.Path) != a.Filename {
+				return fmt.Errorf("pip artifact URL must end with the wheel filename %q: %s", a.Filename, a.URL)
 			}
 			seen[a.Filename] = true
 		}

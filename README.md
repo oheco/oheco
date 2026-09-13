@@ -2,11 +2,13 @@
 
 鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
-> **v0.7.1** 将官网和默认索引统一为 `https://oheco.org`，保留 v0.7.0 的
-> schema v5 原生依赖、批量安装/卸载及统一 npm/pip 入口。
+> **v0.8.0** 改变了语言包的下载模型：oo 只提供元数据——目录里的适配包直连其发布地址
+> （npm 用 `integrity`、pip 用 `#sha256=` 校验），其余包名转发到用户自己配置的源。oo
+> **不再代理下载、不再校验第三方字节**，也不再屏蔽用户的 npmrc / pip.conf。详见下文
+> “Python 与 Node.js 包”。
 > npm/pip 继续管理各自的依赖与安装状态；oheco 查询中的管理器标记不表示已经安装。
 > 原生测试及隔离 CLI 验收见 `scripts/test-dependencies-native.py`。安装脚本取得正式源已发布版本。
-> 域名迁移与兼容验证见 [0.7.1 验证说明](docs/validation-0.7.1.md)。
+> 历史版本说明见 [0.7.1 验证说明](docs/validation-0.7.1.md)。
 
 ## 安装
 
@@ -193,16 +195,16 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.7.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
+`OHECO_VERSION` 默认 `0.8.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
 `ohos-sdk-toolchains` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 打包不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.7.1
+python3 scripts/package.py --version 0.8.0
 ```
 
-`--version` 省略时同样默认 `0.7.1`。输出 `dist/oheco-0.7.1-ohos-arm64.tar.gz` 和 `.sha256`。
+`--version` 省略时同样默认 `0.8.0`。输出 `dist/oheco-0.8.0-ohos-arm64.tar.gz` 和 `.sha256`。
 同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
@@ -260,7 +262,7 @@ oo install oheco
 oo update
 ```
 
-v0.7.1 默认索引为 `https://oheco.org/index/v5/index.json`，直接访问新域名，
+自 v0.7.1 起默认索引为 `https://oheco.org/index/v5/index.json`，直接访问新域名，
 不再依赖旧 GitHub Pages 地址跳转。显式设置的 `OHECO_INDEX_URL` 仍优先，升级不会擅自
 覆盖用户自定义源；若曾在 shell 配置中设置旧官网地址，请按需改成新 HTTPS 地址。
 索引源改变时，客户端自动重新验证索引缓存，不需要删除安装记录或重新安装已有软件。
@@ -321,32 +323,46 @@ oo pip install <Python包名>
 改为全局。安装和卸载时应选择相同的作用域和目录。
 
 `--` 后的参数仅允许用于**单一外部管理器**，不用于原生包或混合管理器操作，作为参数数组传递，
-不经 shell 求值。`--registry`、额外索引、绕过校验或启用安装脚本等源/安全绕过参数仍被拒绝，
-不是任意透传通道。`--autoremove` / `--cascade` 仅用于原生依赖管理；`-y` 只接受确认，不要求
-pip/npm 清理依赖。
+不经 shell 求值。`--registry`、额外索引、`find-links`、启用安装脚本等**源与脚本**类参数仍被
+拒绝：oo 必须自己决定源，否则同名上游包会顶替目录里的适配包。`--autoremove` / `--cascade`
+仅用于原生依赖管理；`-y` 只接受确认，不要求 pip/npm 清理依赖。
 
 语言包安装由所选 Python 的 pip 或 PATH 中的 npm 执行。Python 默认使用 PATH 中的
 `python3`，可通过 `OHECO_PYTHON` 选择解释器；npm 的 `--prefix` 可选择独立目录。安装库时，
 应选择实际使用它的 Python 环境或 Node.js 项目。全局 npm 库不会自动成为其他项目的依赖。
 
-`oo` 在安装期间启动带随机路径的 loopback HTTP 源。它把目录中收录的同名适配包优先交给
-pip/npm；未收录的依赖通过 PyPI/npm 官方源解析。所有返回的包下载地址都指向临时服务，
-由 oo 使用调用者的 HTTP(S) 代理下载、校验并缓存，然后提供给 pip/npm。目录包按 SHA-256
-和大小验证，Python 上游包按 SHA-256，npm 上游包按其 SRI（旧包可用 SHA-1）。目录包的
-归档元数据也必须与描述文件一致。不会合并同名包的上游版本，避免解析回未适配产物。
+`oo` 在安装期间启动一个带随机路径的 loopback HTTP 源，但**只提供元数据**，不再代理下载：
 
-Python 目前只安装 wheel；需要原生代码的包必须预先提供兼容 wheel。npm 禁用生命周期
-脚本，适配包必须包含可直接使用的预编译产物。直接 URL、Git、本地路径依赖及 npm
-workspace 安装暂不支持；项目 `.npmrc` 中覆盖源或代理的设置会报错。pip 不接受额外源、
-requirements 文件或源码构建选项，避免绕过 oo 的下载与验证。普通命名依赖由 pip/npm
-递归解析；上游依赖的版本范围仍由上游发布者维护，需要固定完整环境时使用 npm 锁文件或
-固定的 Python 版本约束。
+- **npm**：目录里收录的适配包由 oo 返回自己的元数据，`dist.tarball` 直接指向描述里的原始
+  地址（通常是 GitHub Releases），并带 `integrity` 由 npm 自己校验；**未收录的包名一律 302
+  转发**到用户 npmrc 里配置的源，包括 `@scope:registry` 形式的 scope 级源。
+- **pip**：oo 是**唯一索引**。目录包只返回适配 wheel 的链接和 `#sha256=`；**未收录的包名**
+  由 oo 聚合用户配置的索引型源（`index-url` + `extra-index-url`）后转发，PEP 691 JSON 与
+  PEP 503 HTML 两种协议都支持，相对链接会解析成绝对地址，哈希和 `requires-python` 原样透传。
 
-npm 使用 `--omit-lockfile-registry-resolved`，锁文件保留版本和完整性信息，省略临时地址。
-之后可以再次运行 `oo npm ci`，由新的临时服务解析下载位置。已有官方 npm 地址的锁文件可
-由 npm 迁移；自定义源和旧临时地址需先重新生成锁文件。用户的 pip/npm 源配置不会被修改。
-中断时 oo 终止自己的包管理器进程组并关闭服务；安装目录遵循 pip/npm 的中断恢复行为，
-需要时重跑安装。
+因此 **oo 不再下载、缓存或校验第三方字节**：第三方包的安全性由 npm/pip 自身的完整性校验和
+用户选择的源决定。目录包的 `integrity` / `#sha256=` 仍来自目录描述，所以适配产物本身仍有
+完整性保护。`find-links` 不是索引型源，无法在“一个包名一个源”的前提下安全聚合，oo 会明确
+报错而不是静默忽略。
+
+用户的包管理器配置会被正常加载：`~/.npmrc`、项目 `.npmrc`、`NPM_CONFIG_*`、`pip.conf`、
+`PIP_*` 环境变量以及代理设置都会生效（oo 只把 loopback 加进 `NO_PROXY`，只剥离能在工具内部
+执行代码的 `NODE_OPTIONS`）。oo 只强制两件与校验无关的事：npm 禁用安装脚本
+（`--ignore-scripts`），pip 只安装 wheel（`--only-binary=:all:`）。目录里的 scoped 适配包由 oo
+在命令行上强制指向临时源，保证装到适配版本而不是同名的上游版本。
+
+oo 只转发元数据、**不经手凭据**：若用户的源配置了 token 或 URL 里的用户名密码，这些请求会
+以匿名身份发出，oo 会提前提示；需要认证的源可能返回 401/403。
+
+Python 只安装 wheel；需要原生代码的包必须预先提供兼容 wheel。npm 禁用生命周期脚本，适配包
+必须包含可直接使用的预编译产物。直接 URL、Git、本地路径依赖及 npm workspace 安装仍不支持。
+项目 `.npmrc` 里能在 npm 内执行代码的设置（`node-options`、`script-shell`、`onload-script`）
+会被拒绝；其他源与代理设置会被尊重。
+
+npm 仍使用 `--omit-lockfile-registry-resolved`，锁文件保留版本和完整性信息、省略下载地址。
+锁文件里已有的 `resolved` 现在接受任意 HTTPS 源，但 http 或 loopback 地址会被拒绝，需要重新
+生成锁文件。用户的 pip/npm 源配置不会被修改。中断时 oo 终止自己的包管理器进程组并关闭服务；
+安装目录遵循 pip/npm 的中断恢复行为，需要时重跑安装。
 
 语言环境及其依赖由 pip/npm 实时解析和管理，不镜像为 oo 的原生安装记录。使用 `oo pip list`、
 `oo npm list` 查询相应环境，使用统一 `oo remove` 或旧 `oo pip uninstall <包名>`、
@@ -363,13 +379,14 @@ go run ./cmd/oo-index --inspect package.tgz --package-manager npm --url https://
 
 输出分别放入 `pip_artifacts` 数组或 `npm_artifacts` 对象。npm 保留归档内完整
 `package.json`；wheel 保留文件名、`Requires-Python` 和 `Requires-Dist`。发布检查
-`--verify-artifacts` 会重新下载并核对这些信息。协议测试在安装了 pip/npm 时执行真实的
-依赖安装、wheel 选择、npm 锁文件跨服务复用、缓存校验和卸载。
+`--verify-artifacts` 会重新下载并核对这些信息。协议测试在安装了 pip/npm 时执行真实的依赖
+安装、wheel 平台标签选择、目录包元数据（`integrity` / `#sha256=`）校验、非目录包转发与聚合，
+以及卸载。
 
-鸿蒙交互式终端中的代理验收可运行：
+鸿蒙交互式终端中的代理验收可运行（代理按当前环境填写，本机已用 `127.0.0.1:10808`）：
 
 ```zsh
-python3 scripts/test-language-native.py --proxy socks5://172.16.105.2:10808 \
+python3 scripts/test-language-native.py --proxy socks5://127.0.0.1:10808 \
   --tmp-parent /path/to/app-private/tests
 ```
 

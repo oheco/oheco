@@ -49,3 +49,35 @@ func TestLanguageArtifactExclusivityAndCompatibility(t *testing.T) {
 		t.Fatal("accepted mismatched tarball manifest name")
 	}
 }
+
+// TestPipArtifactURLMustEndWithWheelFilename pins the rule pip relies on: on an
+// HTML index pip derives the distribution filename from the URL's last path
+// segment, so a mismatched URL would be skipped as an invalid wheel instead of
+// producing a clear error.
+func TestPipArtifactURLMustEndWithWheelFilename(t *testing.T) {
+	build := func(address string) Package {
+		p := Package{SchemaVersion: 3, Name: "wheel-fixture", PackageManager: "pip", PackageName: "wheel-fixture",
+			Description: "fixture", Upstream: "https://example.com/upstream", Repository: "https://github.com/oheco/fixture",
+			Maintainers: []Maintainer{{GitHub: "kdada"}}, License: "MIT", Latest: map[string]string{"ohos-arm64": "1.0.0"}}
+		p.Versions = []Version{{Version: "1.0.0", PipArtifacts: []PipArtifact{{File: File{
+			URL: address, SHA256: strings.Repeat("d", 64), Size: 1, Filename: "wheel_fixture-1.0.0-py3-none-any.whl"}}}}}
+		return p
+	}
+	// A query string does not change the path basename pip uses.
+	for _, address := range []string{
+		"https://example.com/wheel_fixture-1.0.0-py3-none-any.whl",
+		"https://example.com/wheel_fixture-1.0.0-py3-none-any.whl?download=1",
+	} {
+		if err := build(address).Validate(); err != nil {
+			t.Fatalf("rejected a matching wheel URL %s: %v", address, err)
+		}
+	}
+	for _, address := range []string{
+		"https://example.com/wheel.whl",
+		"https://example.com/download/1.0.0",
+	} {
+		if err := build(address).Validate(); err == nil {
+			t.Errorf("accepted a pip URL that does not end with the wheel filename: %s", address)
+		}
+	}
+}

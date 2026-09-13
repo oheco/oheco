@@ -81,6 +81,7 @@ func TestExternalQueryShowsOwnershipNotInstalledState(t *testing.T) {
 			v.NpmArtifacts = &catalog.NpmArtifact{File: file, PackageJSON: json.RawMessage(`{"name":"fixture-npm","version":"1.0.0"}`)}
 		} else {
 			file.Filename = "fixture_pip-1.0.0-py3-none-any.whl"
+			file.URL = "https://example.com/" + file.Filename
 			v.PipArtifacts = []catalog.PipArtifact{{File: file}}
 		}
 		p.Versions = []catalog.Version{v}
