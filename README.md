@@ -88,7 +88,7 @@ v0.7.0 的原生依赖使用下述 schema v5；npm/pip 依赖仍由相应后端�
 升级包管理器使用 `oo update && oo install oheco`。
 
 软件目录已收录 Go 原生工具链，可通过 `oo install go` 安装。当前适配包版本为
-`1.27.1-ohos.1`；签名工具、cgo 依赖及宿主配置见
+`1.27.1-ohos.1`；签名工具（`ohos-sdk-toolchains` 包）、cgo 依赖及系统配置见
 [Go 适配说明](https://github.com/oheco/go/blob/go1.27.1-ohos.1/misc/harmony/README.md)。
 
 ## v0.7.0：逐版本原生依赖
@@ -171,7 +171,7 @@ schema v5 在 `versions[].dependencies` 声明依赖，对应
 缺少目录身份的旧版未提交日志会保留新增目录并提示人工核对，不冒险删除；已提交操作继续完成清理。
 单条链接通过重命名替换；多个命令的链接逐条切换，不承诺对外同时变化，也不承诺底层
 文件系统不支持的断电持久化。确认提示支持 SIGINT/SIGTERM 取消，取消后不提交卸载。
-请在鸿蒙宿主执行安装，以保留宿主所需执行权限。
+请在鸿蒙上执行安装，以保留所需的执行权限。
 下载缓存不会随卸载删除，可手动删除 `cache/downloads/` 中的缓存文件。
 
 ## 原生构建
@@ -193,16 +193,16 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.7.0`（开发版，未发布）。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
-签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
+`OHECO_VERSION` 默认 `0.7.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
+`ohos-sdk-toolchains` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
-Linux 侧打包，不改变已签名二进制内容：
+打包不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.7.0
+python3 scripts/package.py --version 0.7.1
 ```
 
-`--version` 省略时同样默认 `0.7.0`。输出 `dist/oheco-0.7.0-ohos-arm64.tar.gz` 和 `.sha256`。
+`--version` 省略时同样默认 `0.7.1`。输出 `dist/oheco-0.7.1-ohos-arm64.tar.gz` 和 `.sha256`。
 同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
@@ -214,7 +214,7 @@ go test ./...
 go vet ./...
 ```
 
-宿主使用 OHOS Go 重复执行同一测试套件，临时目录使用宿主私有可写目录。
+在鸿蒙上使用 OHOS Go 重复执行同一测试套件，临时目录使用应用私有可写目录。
 测试包括多版本和多命令切换、离线卸载、损坏下载、索引失败保留、命令冲突、
 安全解压、进程锁和中断恢复。
 
@@ -231,7 +231,7 @@ go run ./cmd/oo-index --verify-artifacts
 ## ZIP、启动器与 SDK
 
 ZIP 安装使用 Go 标准库，无需外部解压程序。已在鸿蒙验证系统 `zip` 3.0 / `unzip` 6.0，
-以及解压后的签名程序执行。启动器依赖 `/bin/sh` 和支持 `-f` 的 `readlink`，宿主均已验证。
+以及解压后的签名程序执行。启动器依赖 `/bin/sh` 和支持 `-f` 的 `readlink`，均已在鸿蒙上验证。
 
 ZIP 和 tar.gz 解压默认处理普通文件的大小写冲突：同一目录中仅文件名大小写不同的条目，
 保留全小写文件名对应的原始内容与执行权限，不受压缩包条目顺序或目标文件系统影响。
@@ -247,7 +247,7 @@ ZIP 和 tar.gz 解压默认处理普通文件的大小写冲突：同一目录�
 SDK 按组件收录为 `ohos-sdk-native`、`ohos-sdk-toolchains`、`ohos-sdk-ets`、`ohos-sdk-js`、
 `ohos-sdk-previewer`，版本统一为 `26.0.0.35-Beta`。Previewer 当前只有元数据，允许
 `binaries: {}`。ETS/JS 作为开发资源包提供，不创建编译器命令链接；完整应用构建
-需另行配置相应运行环境，内置编译工具的宿主执行验证情况见 [验证记录](docs/VALIDATION.md)。
+需另行配置相应运行环境，内置编译工具的执行验证情况见 [验证记录](docs/VALIDATION.md)。
 当前不支持 LLDB，也不创建 lldb-server 等相关链接。
 
 ## 索引兼容与升级
@@ -374,9 +374,9 @@ python3 scripts/test-language-native.py --proxy socks5://172.16.105.2:10808 \
 ```
 
 脚本在独立目录中访问官方源，验证 `is-number@7.0.0` 和 `idna==3.10`，结束后清理。
-Linux/鸿蒙共享检出若触发 Git 所有权检查，构建时可仅给该进程设置
+检出目录若触发 Git 所有权检查，构建时可仅给该进程设置
 `GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=safe.directory` 和
-`GIT_CONFIG_VALUE_0=<宿主源码绝对路径>`，无需修改全局 Git 配置。
+`GIT_CONFIG_VALUE_0=<源码绝对路径>`，无需修改全局 Git 配置。
 
 ## DevEco 项目导出
 
@@ -398,7 +398,7 @@ oo export godot-editor
 
 `oo export <包名[@版本]> [项目名] [-o|--output 目录]`：只有一个项目时可省略项目名；
 多个项目时列出名称并要求选择。目标目录默认当前目录，缺失的目录会创建。
-版本默认取当前平台的 `latest`；在其他开发宿主导出时，如果所有 `latest` 条目指向
+版本默认取当前平台的 `latest`；在其他平台导出时，如果所有 `latest` 条目指向
 同一版本，也可直接使用默认版本；若它们不同，需要显式指定 `@版本`。
 
 导出沿用代理、进度、大小/SHA-256 校验和下载缓存。完整解压验证后才写入目标目录；

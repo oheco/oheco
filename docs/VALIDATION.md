@@ -6,8 +6,8 @@
 
 ## 2026-09-12 · 0.2.0 开发验证
 
-- 宿主 `/usr/bin/zip` 3.0、`/usr/bin/unzip` 6.0 可用。使用 unzip 解出原始
-  toolchains ZIP 的 binary-sign-tool，字节哈希与 SDK 目录中的文件一致，帮助命令退出 0。
+- 系统 `/usr/bin/zip` 3.0、`/usr/bin/unzip` 6.0 可用。使用 unzip 解出原始
+  toolchains ZIP 的 binary-sign-tool（来自 `ohos-sdk-toolchains` 包），字节哈希与 SDK 目录中的文件一致，帮助命令退出 0。
 - Linux：`go test -race ./...`、`go vet ./...` 和 gofmt 通过；鸿蒙：`go test ./...` 通过。
 - ZIP 测试覆盖 CRC 损坏、截断、大小上限、加密标志、路径越界、目录剥离、重复条目、
   特殊文件、执行权限，以及内部软链接、越界/循环/悬空软链接和保留启动器目录。
@@ -29,7 +29,7 @@
   Ninja、HDC 通过版本命令检查。通过安装后的 clang 编译 C 程序、安装后的 binary-sign-tool
   自签名并执行成功；CMake 通过启动器找到随包 Modules；删除索引后的组件切换和全部卸载通过。
 - native 的 sysroot 含 8 对仅大小写不同的文件，早期严格解压在主目录因文件重名失败。
-  0.2.0 按大小写冲突处理规则保留原始小写版本。ETS 的原始 es2abc 在共享目录执行被宿主拒绝，ETS/JS 按资源包
+  0.2.0 按大小写冲突处理规则保留原始小写版本。ETS 的原始 es2abc 在共享目录执行被系统拒绝，ETS/JS 按资源包
   收录，不创建编译器链接。LLDB 及其相关命令不注册。
 
 本轮输出：`sdk-unit-host.log`、`sdk-e2e-home-host.log`（主目录）、
@@ -47,7 +47,7 @@ SDK 和安装器集成测试的隔离目录已清理。
 
 - 开发与通用测试：Linux arm64，Go 1.27.1。
 - 原生构建与集成：HarmonyOS / aarch64，已移植的 Go 1.27.1 ohos/arm64。
-- 原生构建由 Go 工具链调用宿主 PATH 中的 `binary-sign-tool` 完成签名。
+- 原生构建由 Go 工具链调用 PATH 中的 `binary-sign-tool`（由 `ohos-sdk-toolchains` 包提供）完成签名。
 
 ## 已通过
 
@@ -59,7 +59,7 @@ SDK 和安装器集成测试的隔离目录已清理。
 - 解压：越界路径、包外软链接、通过软链接写文件、重复条目、硬链接及非可执行命令。
 - 事务：中断安装回滚、部分链接切换恢复、已提交卸载清理以及独占进程锁。
 - 目录保护：拒绝沿用户替换的包目录软链接卸载其他位置的内容。
-- 完整自举：通过宿主 loopback HTTP 服务执行 `curl | zsh`，在含空格的隔离根目录安装。
+- 完整自举：通过本机 loopback HTTP 服务执行 `curl | zsh`，在含空格的隔离根目录安装。
 - 原生 Go：下载现有 66,411,593 字节发行包，校验 SHA-256、解压、建立 go/gofmt 链接。
 - Go 重定位：清除 GOROOT 后，通过默认链接得到版本目录内的 GOROOT，GOOS 为 ohos。
 - 已安装 Go：`go version`、`gofmt@1.27.1 -h`、编译/签名/运行一个 Go 程序。
@@ -71,8 +71,8 @@ SDK 和安装器集成测试的隔离目录已清理。
 
 ## 复现原生端到端测试
 
-以下命令使用当前检出的测试脚本，具体测试版本随源码更新。在 Linux 侧准备好包描述及
-脚本所需发行文件后，从 oheco 仓库运行：
+以下命令使用当前检出的测试脚本，具体测试版本随源码更新。先准备好包描述及
+脚本所需发行文件，再从 oheco 仓库运行：
 
 ```sh
 python3 scripts/prepare-native-test.py
@@ -81,7 +81,7 @@ go run ./cmd/oo-index \
   --output ../oheco-packages/tmp/e2e-public
 ```
 
-然后在鸿蒙宿主的 oheco 仓库中运行（先配置原生 Go 和私有可写 TMPDIR）：
+然后运行原生端到端测试（先配置原生 Go 和私有可写 TMPDIR）：
 
 ```zsh
 go build -o build/testserver ./scripts/testserver
@@ -93,7 +93,7 @@ wait "$oo_fixture_pid" || true
 ```
 
 fixture 只改写忽略目录内的索引 URL，不修改正式描述；使用真实的已签名软件包。
-它监听宿主 `127.0.0.1:18808`，可在独立终端前台启动，确认 ready 后再执行测试。
+它监听本机 `127.0.0.1:18808`，可在独立终端前台启动，确认 ready 后再执行测试。
 
 ## 索引和下载站
 
@@ -129,7 +129,7 @@ fixture 只改写忽略目录内的索引 URL，不修改正式描述；使用�
 - 已通过 HTTPS 验证[下载站](https://oheco.github.io/oheco-packages/)、
   [安装脚本](https://oheco.github.io/oheco-packages/install.sh)和
   [索引](https://oheco.github.io/oheco-packages/index/v1/index.json)可访问且内容正确。
-- 鸿蒙宿主已直接使用公开地址完成 `curl | zsh` 自举、默认源索引同步、Go 下载和安装、
+- 鸿蒙上已直接使用公开地址完成 `curl | zsh` 自举、默认源索引同步、Go 下载和安装、
   Go 重定位、编译/签名/运行程序、版本切换及卸载。原始输出为 `build/public-host.log`。
   测试在隔离的临时安装目录执行，结束后清理。
 
@@ -148,7 +148,7 @@ fixture 只改写忽略目录内的索引 URL，不修改正式描述；使用�
 - 鸿蒙：使用已安装的 Go 1.27.1 原生工具链，在新的应用私有 Go 缓存中执行全量
   `go test -p 2 -count=1 ./...`、`go vet -p 2 ./...` 并签名构建，输出
   `oo 0.6.0 (ohos/arm64)`。编译并发限制为 2，没有替换用户的工具链或修改全局配置。
-- Go 测试覆盖 projects-only/混合版本、单项目默认、多项目选择、版本及跨宿主 latest
+- Go 测试覆盖 projects-only/混合版本、单项目默认、多项目选择、版本及跨平台 latest
   歧义、ZIP/tar.gz、下载和缓存损坏、路径越界、重复条目、严格大小写冲突、内部软链接、
   含空格路径、已有文件/目录保护、复制取消清理和无安装记录/命令链接。
 - 当前包描述及生成的 v1/v2/v3/v4 索引通过 JSON Schema 2020-12 验证；无效项目
