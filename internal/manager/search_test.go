@@ -42,9 +42,9 @@ func TestSearchTable(t *testing.T) {
 		t.Fatalf("expected header and two rows, got %q", out.String())
 	}
 	rows := [][]string{
-		{"NAME", "LATEST", "INSTALLED", "SIZE", "MAINTAINERS", "DESCRIPTION"},
-		{"demo", "1.0.0", "-", "1.5 KiB", "Alice Example, @bob", "A package with 多行说明"},
-		{"long-package-name", "3.0.0", "-", "2.0 MiB", "@oheco", "test package"},
+		{"NAME", "MANAGER", "LATEST", "INSTALLED", "SIZE", "MAINTAINERS", "DESCRIPTION"},
+		{"demo", "oheco", "1.0.0", "-", "1.5 KiB", "Alice Example, @bob", "A package with 多行说明"},
+		{"long-package-name", "oheco", "3.0.0", "-", "2.0 MiB", "@oheco", "test package"},
 	}
 	for row, cells := range rows {
 		for col, cell := range cells {

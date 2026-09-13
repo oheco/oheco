@@ -346,7 +346,11 @@ func TestRecoveryOfInterruptedInstallAndRemoval(t *testing.T) {
 	}
 	installed, _ := f.m.LoadState()
 	empty := emptyState()
-	writeJSON(filepath.Join(f.m.Root, "state", "transaction.json"), transaction{Before: empty, After: installed})
+	move, err := transactionDirectory(filepath.Join("demo", "1.0.0"), filepath.Join(f.m.Root, "packages", "demo", "1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(filepath.Join(f.m.Root, "state", "transaction.json"), transaction{Before: empty, After: installed, Moves: []transactionMove{move}})
 	if err := f.m.Recover(); err != nil {
 		t.Fatal(err)
 	}

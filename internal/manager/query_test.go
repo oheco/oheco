@@ -3,6 +3,7 @@ package manager
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -44,7 +45,7 @@ func TestInstalledSearchAndListTables(t *testing.T) {
 	if err := f.m.List(); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); strings.Count(got, "\n") != 2 || !strings.Contains(got, "1.0.0*, 1.9.0, 1.10.0") || !strings.Contains(got, "Alice Example, @bob") {
+	if got := out.String(); strings.Count(got, "\n") != 3 || !strings.Contains(got, "MANAGER") || !strings.Contains(got, "oheco") || !strings.Contains(got, "1.0.0*, 1.9.0, 1.10.0") || !strings.Contains(got, "Alice Example, @bob") {
 		t.Fatalf("incorrect grouped list: %q", got)
 	}
 	lines = strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -56,8 +57,72 @@ func TestInstalledSearchAndListTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := f.m.List(); err != nil || !strings.Contains(out.String(), "1.0.0*, 1.9.0, 1.10.0") || !strings.HasSuffix(out.String(), "-\n") {
+	if err := f.m.List(); err != nil || !strings.Contains(out.String(), "1.0.0*, 1.9.0, 1.10.0") || !strings.HasSuffix(strings.Split(out.String(), "\n")[1], "-") || !strings.Contains(out.String(), "npm/pip") {
 		t.Fatalf("list must work without an index: %q, %v", out.String(), err)
+	}
+}
+
+func TestExternalQueryShowsOwnershipNotInstalledState(t *testing.T) {
+	f := setup(t)
+	f.idx.SchemaVersion = catalog.SchemaVersion
+	base := f.idx.Packages[0]
+	a := base.Versions[0].Artifacts[f.m.Platform]
+	for _, backend := range []string{"npm", "pip"} {
+		p := base
+		p.SchemaVersion = 3
+		p.Name = "fixture-" + backend
+		p.PackageManager = backend
+		p.PackageName = "fixture-" + backend
+		p.Latest = map[string]string{f.m.Platform: "1.0.0"}
+		v := catalog.Version{Version: "1.0.0"}
+		file := catalog.File{URL: a.URL, SHA256: a.SHA256, Size: a.Size}
+		if backend == "npm" {
+			file.Filename = "fixture-npm-1.0.0.tgz"
+			v.NpmArtifacts = &catalog.NpmArtifact{File: file, PackageJSON: json.RawMessage(`{"name":"fixture-npm","version":"1.0.0"}`)}
+		} else {
+			file.Filename = "fixture_pip-1.0.0-py3-none-any.whl"
+			v.PipArtifacts = []catalog.PipArtifact{{File: file}}
+		}
+		p.Versions = []catalog.Version{v}
+		f.idx.Packages = append(f.idx.Packages, p)
+	}
+	if err := writeJSON(filepath.Join(f.m.Root, "index", "index.json"), f.idx); err != nil {
+		t.Fatal(err)
+	}
+	requests := f.requests
+	var out bytes.Buffer
+	f.m.Out = &out
+	if err := f.m.Search(context.Background(), "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "MANAGER") || !strings.Contains(out.String(), "<由 npm 管理>") || !strings.Contains(out.String(), "<由 pip 管理>") {
+		t.Fatalf("missing ownership columns: %s", out.String())
+	}
+	if f.requests != requests {
+		t.Fatal("query fetched remote language state")
+	}
+	for _, backend := range []string{"npm", "pip"} {
+		out.Reset()
+		if err := f.m.Info("fixture-" + backend); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "Package manager: "+backend) || !strings.Contains(out.String(), "not an installed-state assertion") {
+			t.Fatalf("ambiguous info: %s", out.String())
+		}
+	}
+	out.Reset()
+	if err := f.m.List(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "fixture-npm") || strings.Contains(out.String(), "fixture-pip") {
+		t.Fatal("uninstalled catalog packages listed as installed")
+	}
+	out.Reset()
+	if err := f.m.Info("demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Package manager: oheco") {
+		t.Fatal("native manager missing")
 	}
 }
 

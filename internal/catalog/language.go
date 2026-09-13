@@ -83,6 +83,9 @@ func (f File) Validate() error {
 	return nil
 }
 func (p Package) validateVersion(v Version) error {
+	if err := p.validateDependencies(v); err != nil {
+		return err
+	}
 	if v.Artifacts != nil && len(v.Artifacts) == 0 {
 		return fmt.Errorf("artifacts must contain at least one platform when present")
 	}

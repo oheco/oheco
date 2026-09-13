@@ -1,9 +1,11 @@
 package manager
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +23,7 @@ func TestLanguageInstallUsesNpmAndPreservesUserConfig(t *testing.T) {
 		t.Skip("npm unavailable")
 	}
 	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir()) // Keep npm's cache/logs out of the user's home.
 	old, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +59,7 @@ func TestLanguageInstallUsesNpmAndPreservesUserConfig(t *testing.T) {
 	}
 	b, _ := json.Marshal(idx)
 	os.WriteFile(filepath.Join(m.Root, "index", "index.json"), b, 0644)
-	if err := m.Install(context.Background(), "fixture", false); err != nil {
+	if err := m.InstallLanguage(context.Background(), idx, "npm", []string{"oo-language-fixture@1.0.0"}, LanguageOptions{Args: []string{"--global=false", "--prefix", dir}, Yes: true}); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	cmd := exec.Command("node", "-e", "console.log(require('oo-language-fixture'))")
@@ -86,6 +89,97 @@ func TestLanguageInstallUsesNpmAndPreservesUserConfig(t *testing.T) {
 	if len(leftovers) != 0 {
 		t.Fatal("temporary configuration remains")
 	}
+}
+
+func TestLanguagePipResolvesWheelDependenciesInIsolatedTarget(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	if err := exec.Command(python, "-B", "-m", "pip", "--version").Run(); err != nil {
+		t.Skip("pip unavailable")
+	}
+	t.Setenv("OHECO_PYTHON", python)
+	t.Setenv("HOME", t.TempDir())
+	rootBytes := languageWheel(t, "oo_language_root", "oo-language-dep==1.0.0")
+	depBytes := languageWheel(t, "oo_language_dep", "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/root.whl":
+			w.Write(rootBytes)
+		case "/dep.whl":
+			w.Write(depBytes)
+		default:
+			t.Errorf("unexpected artifact request %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	var out bytes.Buffer
+	m, err := New(filepath.Join(dir, "oo"), server.URL+"/unused-index.json", &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &http.Transport{}
+	defer transport.CloseIdleConnections()
+	m.Client = &http.Client{Transport: downloadRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != strings.TrimPrefix(server.URL, "http://") {
+			return nil, fmt.Errorf("external network forbidden in language test: %s", r.URL.Host)
+		}
+		return transport.RoundTrip(r)
+	})}
+	idx := languageTestIndex()
+	for i, name := range []string{"oo-language-root", "oo-language-dep"} {
+		data, address := rootBytes, server.URL+"/root.whl"
+		if i == 1 {
+			data, address = depBytes, server.URL+"/dep.whl"
+		}
+		a := artifact(data, address, nil)
+		wheel := catalog.PipArtifact{File: catalog.File{URL: address, SHA256: a.SHA256, Size: a.Size, Filename: strings.ReplaceAll(name, "-", "_") + "-1.0.0-py3-none-any.whl"}, RequiresPython: ">=3.8"}
+		if i == 0 {
+			wheel.RequiresDist = []string{"oo-language-dep==1.0.0"}
+		}
+		p := catalog.Package{SchemaVersion: 3, Name: name, PackageManager: "pip", PackageName: name, Description: "isolated wheel fixture", Upstream: "https://example.com/fixture", Repository: "https://github.com/oheco/fixture", Maintainers: []catalog.Maintainer{{GitHub: "kdada"}}, License: "MIT", Latest: map[string]string{m.Platform: "1.0.0"}, Versions: []catalog.Version{{Version: "1.0.0", PipArtifacts: []catalog.PipArtifact{wheel}}}}
+		idx.Packages = append(idx.Packages, p)
+	}
+	target := filepath.Join(dir, "target with spaces")
+	if err := m.InstallLanguage(context.Background(), idx, "pip", []string{"oo-language-root==1.0.0"}, LanguageOptions{Args: []string{"--target", target, "--no-cache-dir"}, Yes: true}); err != nil {
+		t.Fatalf("%v\n%s", err, &out)
+	}
+	cmd := exec.Command(python, "-B", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import oo_language_root, oo_language_dep; print(oo_language_root.value + oo_language_dep.value)", target)
+	got, err := cmd.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(got)) != "84" {
+		t.Fatalf("dependency import: %v %s", err, got)
+	}
+	if _, err := os.Stat(filepath.Join(m.Root, "state")); !os.IsNotExist(err) {
+		t.Fatalf("pip install created oo records: %v", err)
+	}
+}
+
+func languageWheel(t *testing.T, name, dependency string) []byte {
+	t.Helper()
+	var data bytes.Buffer
+	z := zip.NewWriter(&data)
+	dist := name + "-1.0.0.dist-info/"
+	metadata := "Metadata-Version: 2.1\nName: " + strings.ReplaceAll(name, "_", "-") + "\nVersion: 1.0.0\nRequires-Python: >=3.8\n"
+	if dependency != "" {
+		metadata += "Requires-Dist: " + dependency + "\n"
+	}
+	files := map[string]string{name + "/__init__.py": "value = 42\n", dist + "METADATA": metadata + "\n", dist + "WHEEL": "Wheel-Version: 1.0\nGenerator: oo-tests\nRoot-Is-Purelib: true\nTag: py3-none-any\n", dist + "RECORD": ""}
+	for path, content := range files {
+		w, err := z.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return data.Bytes()
 }
 
 func TestLanguageRejectsRegistryBypasses(t *testing.T) {

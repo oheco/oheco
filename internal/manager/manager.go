@@ -25,6 +25,7 @@ type Manager struct {
 	IndexURL string
 	Client   *http.Client
 	Out      io.Writer
+	In       io.Reader
 }
 
 func New(root, indexURL string, out io.Writer) (*Manager, error) {
@@ -51,7 +52,7 @@ func New(root, indexURL string, out io.Writer) (*Manager, error) {
 	if out == nil {
 		out = io.Discard
 	}
-	return &Manager{Root: root, Platform: runtime.GOOS + "-" + runtime.GOARCH, IndexURL: indexURL, Client: HTTPClient(), Out: out}, nil
+	return &Manager{Root: root, Platform: runtime.GOOS + "-" + runtime.GOARCH, IndexURL: indexURL, Client: HTTPClient(), Out: out, In: os.Stdin}, nil
 }
 
 func plainDir(filename string) error {
@@ -96,39 +97,7 @@ func SplitSpec(spec string) (string, string, error) {
 }
 
 func (m *Manager) Install(ctx context.Context, spec string, noSwitch bool) error {
-	name, version, err := SplitSpec(spec)
-	if err != nil {
-		return err
-	}
-	return m.withLock(func() error {
-		idx, err := m.LoadIndex()
-		if err != nil {
-			return err
-		}
-		p, err := idx.Find(name)
-		if err != nil {
-			return err
-		}
-		if p.Manager() != "oheco" {
-			if noSwitch {
-				return fmt.Errorf("--no-switch is only supported for native packages")
-			}
-			v, err := p.LanguageVersion(version, m.Platform)
-			if err != nil {
-				return err
-			}
-			separator := "@"
-			if p.Manager() == "pip" {
-				separator = "=="
-			}
-			return m.languageLocked(ctx, idx, p.Manager(), []string{"install", p.PackageName + separator + v.Version})
-		}
-		version, a, err := p.Resolve(version, m.Platform)
-		if err != nil {
-			return err
-		}
-		return m.installLocked(ctx, name, version, a, "", noSwitch)
-	})
+	return m.InstallMany(ctx, []string{spec}, InstallOptions{NoSwitch: noSwitch})
 }
 
 // Bootstrap imports an already verified official archive through the same installer.
@@ -250,6 +219,13 @@ func (m *Manager) installLocked(ctx context.Context, name, version string, a cat
 }
 
 func (m *Manager) Switch(name, version string) error {
+	return m.SwitchContext(context.Background(), name, version)
+}
+
+func (m *Manager) SwitchContext(ctx context.Context, name, version string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !catalog.ValidName(name) || !catalog.ValidComponent(version) {
 		return fmt.Errorf("usage: oo switch <package> <version>")
 	}
@@ -269,11 +245,25 @@ func (m *Manager) Switch(name, version string) error {
 		if err := verifyInstalled(filepath.Join(m.Root, "packages", name, version), r.Artifact); err != nil {
 			return err
 		}
-		after := cloneState(before)
-		p = after.Packages[name]
-		p.Active = version
-		after.Packages[name] = p
-		if err := m.commit(before, after, "", ""); err != nil {
+		idx := catalog.Index{SchemaVersion: catalog.SchemaVersion}
+		for installedName, installed := range before.Packages {
+			entry := catalog.Package{Name: installedName}
+			for v, receipt := range installed.Versions {
+				entry.Versions = append(entry.Versions, receiptVersion(v, receipt))
+			}
+			idx.Packages = append(idx.Packages, entry)
+		}
+		plan, err := m.planNative(idx, before, []nativeRequest{{Name: name, Version: version}})
+		if err != nil {
+			return err
+		}
+		for _, step := range plan.Steps {
+			if !step.Reused {
+				return fmt.Errorf("switch requires already installed dependencies; run oo install %s@%s", name, version)
+			}
+		}
+		m.printNativePlan(plan)
+		if err := m.executeNativePlan(ctx, plan); err != nil {
 			return err
 		}
 		fmt.Fprintf(m.Out, "Switched %s to %s\n", name, version)
@@ -282,58 +272,7 @@ func (m *Manager) Switch(name, version string) error {
 }
 
 func (m *Manager) Remove(spec string, all bool) error {
-	name, version, err := SplitSpec(spec)
-	if err != nil {
-		return err
-	}
-	if all && version != "" {
-		return fmt.Errorf("--all cannot be combined with a version")
-	}
-	return m.withLock(func() error {
-		before, err := m.LoadState()
-		if err != nil {
-			return err
-		}
-		p, ok := before.Packages[name]
-		if !ok {
-			return fmt.Errorf("%s is not installed", name)
-		}
-		if !all && version == "" {
-			version = p.Active
-			if version == "" {
-				return fmt.Errorf("%s has no active version; specify name@version or --all", name)
-			}
-		}
-		if !all {
-			if _, ok := p.Versions[version]; !ok {
-				return fmt.Errorf("%s@%s is not installed", name, version)
-			}
-		}
-		after := cloneState(before)
-		p = after.Packages[name]
-		if all {
-			delete(after.Packages, name)
-		} else {
-			delete(p.Versions, version)
-			if p.Active == version {
-				p.Active = ""
-			}
-			if len(p.Versions) == 0 {
-				delete(after.Packages, name)
-			} else {
-				after.Packages[name] = p
-			}
-		}
-		if err := m.commit(before, after, "", ""); err != nil {
-			return err
-		}
-		if all {
-			fmt.Fprintf(m.Out, "Removed all versions of %s\n", name)
-		} else {
-			fmt.Fprintf(m.Out, "Removed %s@%s\n", name, version)
-		}
-		return nil
-	})
+	return m.RemoveMany(context.Background(), []string{spec}, RemoveOptions{All: all})
 }
 
 func (m *Manager) List() error {
@@ -347,7 +286,7 @@ func (m *Manager) List() error {
 	}
 	sort.Strings(names)
 	if len(names) == 0 {
-		fmt.Fprintln(m.Out, "No packages installed.")
+		fmt.Fprintln(m.Out, "No native packages installed. npm/pip installations are managed by their respective package managers.")
 		return nil
 	}
 	// Maintainer metadata is optional here: installed versions remain listable
@@ -361,7 +300,7 @@ func (m *Manager) List() error {
 		maintainers[p.Name] = maintainerNames(p.Maintainers)
 	}
 	table := tabwriter.NewWriter(m.Out, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tVERSIONS (* = active)\tMAINTAINERS")
+	fmt.Fprintln(table, "NAME\tMANAGER\tVERSIONS (* = active)\tMAINTAINERS")
 	for _, name := range names {
 		p := s.Packages[name]
 		versions := installedVersions(p, "")
@@ -374,9 +313,13 @@ func (m *Manager) List() error {
 		if who == "" {
 			who = "-"
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\n", name, strings.Join(versions, ", "), who)
+		fmt.Fprintf(table, "%s\toheco\t%s\t%s\n", name, strings.Join(versions, ", "), who)
 	}
-	return table.Flush()
+	if err := table.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(m.Out, "npm/pip: installations are managed by their respective package managers; use oo npm list --global or oo pip list.")
+	return nil
 }
 
 func (m *Manager) Search(ctx context.Context, query string) error {
@@ -399,7 +342,7 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		text := p.Name + " " + p.PackageName + " " + p.Description
+		text := p.Name + " " + p.PackageName + " " + p.Manager() + " " + p.Description
 		for _, v := range p.Versions {
 			for name, project := range v.Projects {
 				text += " " + name + " " + project.Description
@@ -435,7 +378,7 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 				}
 			}
 			if count == 0 {
-				fmt.Fprintln(table, "NAME\tLATEST\tINSTALLED\tSIZE\tMAINTAINERS\tDESCRIPTION")
+				fmt.Fprintln(table, "NAME\tMANAGER\tLATEST\tINSTALLED\tSIZE\tMAINTAINERS\tDESCRIPTION")
 			}
 			installed := "-"
 			versions := installedVersions(state.Packages[p.Name], m.Platform)
@@ -445,8 +388,11 @@ func (m *Manager) searchLocal(ctx context.Context, idx catalog.Index, query stri
 					installed += fmt.Sprintf(" (%d)", len(versions))
 				}
 			}
+			if p.Manager() != "oheco" {
+				installed = "<由 " + p.Manager() + " 管理>"
+			}
 			description := strings.Join(strings.Fields(p.Description), " ")
-			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Name, latest, installed, size, maintainerNames(p.Maintainers), description)
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.Name, p.Manager(), latest, installed, size, maintainerNames(p.Maintainers), description)
 			count++
 		}
 	}
@@ -465,9 +411,9 @@ func (m *Manager) Info(name string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(m.Out, "%s — %s\nUpstream: %s\nPort: %s\nLicense: %s\n", p.Name, p.Description, p.Upstream, p.Repository, p.License)
+	fmt.Fprintf(m.Out, "%s — %s\nPackage manager: %s\nUpstream: %s\nPort: %s\nLicense: %s\n", p.Name, p.Description, p.Manager(), p.Upstream, p.Repository, p.License)
 	if p.Manager() != "oheco" {
-		fmt.Fprintf(m.Out, "Package manager: %s\nPackage name: %s\n", p.Manager(), p.PackageName)
+		fmt.Fprintf(m.Out, "Package name: %s\nInstalled: <由 %s 管理> (management ownership, not an installed-state assertion)\n", p.PackageName, p.Manager())
 		for _, v := range p.Versions {
 			fmt.Fprintf(m.Out, "%s", v.Version)
 			if p.Latest[m.Platform] == v.Version {
@@ -486,6 +432,17 @@ func (m *Manager) Info(name string) error {
 		fmt.Fprintf(m.Out, "Maintainer: @%s %s\n", who.GitHub, who.Name)
 	}
 	for _, v := range p.Versions {
+		for _, d := range v.Dependencies {
+			basis := d.VersionBasis
+			if basis == "" {
+				basis = "package"
+			}
+			platforms := "all artifact platforms"
+			if len(d.Platforms) > 0 {
+				platforms = strings.Join(d.Platforms, ", ")
+			}
+			fmt.Fprintf(m.Out, "%s requires %s %s (%s version; %s)\n", v.Version, d.Name, d.Constraint, basis, platforms)
+		}
 		for _, name := range v.ProjectNames() {
 			project := v.Projects[name]
 			fmt.Fprintf(m.Out, "%s project %s (%s)\n  oo export %s@%s %s\n  %s\n", v.Version, name, byteSize(float64(project.Size)), p.Name, v.Version, name, project.URL)

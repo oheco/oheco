@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.6.0"
+var version = "0.7.0"
 
 const help = `oo — the oheco package manager
 
@@ -20,10 +20,10 @@ Usage:
   oo update                          Refresh the local package index
   oo search [query]                   Search the local package index
   oo info <package>                   Show available versions and package details
-  oo install <package[@version]> [--no-switch]
+  oo install <package[@version]>... [--no-switch] [-y] [--dry-run] [-- backend-args]
   oo export <package[@version]> [project] [-o|--output directory]
   oo switch <package> <version>       Activate an installed version (offline)
-  oo remove <package[@version]> [--all]
+  oo remove <package[@version]>... [--all] [--autoremove] [--cascade] [-y] [--dry-run] [-- backend-args]
   oo list                            List installed versions (* = active)
   oo recover                         Recover an interrupted operation
   oo pip <command> [arguments]        Run pip through oo's temporary source
@@ -37,10 +37,19 @@ Existing files and directories are not overwritten; export does not install.
 remove without a version removes the active version; --all removes every version.
 update refreshes metadata only. To update oo itself: oo update && oo install oheco
 Commands also refresh the index in the background without waiting.
-Language packages install into the current Python environment or npm project.
-Use oo npm install <name> --global for global npm commands. pip/npm own removal
-and installed-package listings; native switch/versioned links do not apply.
+Native dependency plans are checked before installation; --yes accepts a reviewed
+plan without prompting. --autoremove includes unused automatic native dependencies;
+--cascade also removes native reverse dependents. Neither is implied by --yes.
+Language packages use npm global / the selected base Python environment by default.
+Arguments after -- are passed as argv to the one selected external manager; scope
+options override the default. Options bypassing verified downloads are rejected.
+Use npm:<name> / pip:<name> to explicitly select an ecosystem package.
+<由 npm/pip 管理> denotes ownership, not an assertion that the package is installed.
+Only native packages have oo receipts, versioned links and dependency cleanup.
+npm/pip own their dependency resolution; oo does not guarantee external reverse-
+dependency protection, and pip dependencies are retained on removal.
 Only wheels and prebuilt npm packages are supported; npm scripts are disabled.
+Legacy oo npm / oo pip remain available (oo npm keeps its original local default).
 
 Environment:
   OHECO_ROOT        Installation root (default: ~/.oheco)
@@ -65,6 +74,10 @@ func run(ctx context.Context, args []string) error {
 	}
 	if args[0] == "--version" || args[0] == "version" {
 		fmt.Printf("oo %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		return nil
+	}
+	if len(args) == 1 && args[0] == "--state-schema" {
+		fmt.Println(2)
 		return nil
 	}
 	m, err := manager.New(os.Getenv("OHECO_ROOT"), os.Getenv("OHECO_INDEX_URL"), os.Stdout)
@@ -107,32 +120,19 @@ func run(ctx context.Context, args []string) error {
 		}
 		return m.Recover()
 	case "install", "remove":
-		flag, spec := false, ""
-		allowed := "--no-switch"
-		if command == "remove" {
-			allowed = "--all"
-		}
-		for _, arg := range args {
-			if arg == allowed && !flag {
-				flag = true
-			} else if strings.HasPrefix(arg, "-") || spec != "" {
-				return fmt.Errorf("invalid arguments; run oo --help")
-			} else {
-				spec = arg
-			}
-		}
-		if spec == "" {
-			break
+		specs, install, remove, err := operationArgs(command, args)
+		if err != nil {
+			return err
 		}
 		if command == "install" {
-			return m.Install(ctx, spec, flag)
+			return m.InstallMany(ctx, specs, install)
 		}
-		return m.Remove(spec, flag)
+		return m.RemoveMany(ctx, specs, remove)
 	case "switch":
 		if len(args) != 2 {
 			break
 		}
-		return m.Switch(args[0], args[1])
+		return m.SwitchContext(ctx, args[0], args[1])
 	case "_bootstrap":
 		if len(args) != 3 || args[2] != version {
 			return fmt.Errorf("bootstrap version does not match this oo binary")

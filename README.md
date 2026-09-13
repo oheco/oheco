@@ -2,6 +2,10 @@
 
 鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
+> **v0.7.0** 提供 schema v5 的逐版本原生依赖、批量安装/卸载和统一 npm/pip 入口。
+> npm/pip 继续管理各自的依赖与安装状态；oheco 查询中的管理器标记不表示已经安装。
+> 原生测试及隔离 CLI 验收见 `scripts/test-dependencies-native.py`。安装脚本取得正式源已发布版本。
+
 ## 安装
 
 在鸿蒙原生 zsh 终端执行：
@@ -51,32 +55,76 @@ oo install oheco
   请求优先使用 `ETag`，没有 `ETag` 时使用 `Last-Modified`；服务器返回 `304` 时不下载
   索引正文。首次检查、源地址变化、本地索引损坏或服务器没有缓存标识时会下载完整索引。
   设置 `OHECO_NO_AUTO_UPDATE=1` 可关闭自动检查，`oo update` 仍可手动执行。
-- `search` 以对齐表格显示名称、当前平台的最新版本、已安装版本、包大小、维护者和说明。
-  已安装列只显示版本号最新的已装版本；装有多个版本时标注总数，例如 `0.4.0 (3)`，
-  未安装显示 `-`。大小取对应下载包；维护者与 `list` 一致，优先显示姓名，没有姓名则显示 `@GitHub账号`。
-  查询只读取本地索引，不等待后台检查，也不询问是否更新。后台收到过期的同源索引时，
-  会保留较新的本地索引。
-- `install name` 安装该平台的 `latest`；`install name@version` 安装指定版本。
-  默认启用本次安装的版本；`--no-switch` 只安装，保留当前启用状态。
-  下载时显示进度、已下载/总大小和平均下载速度；终端中每 200 毫秒刷新同一行，
+- `search` 查询所有目录管理器（原生、npm、pip），以对齐表格显示名称、管理器、当前平台的最新版本、
+  已安装版本、包大小、维护者和说明。原生包已安装列只显示版本号最新的已装版本；多个版本
+  标注总数，例如 `0.4.0 (3)`，未安装显示 `-`。外部包显示 `<由npm管理>` 或 `<由pip管理>`，
+  **仅表示管理归属，不断言已经安装**。大小取对应下载包；维护者与 `list` 一致，优先显示
+  姓名，没有姓名则显示 `@GitHub账号`。查询只读取本地索引，不等待后台检查，也不询问是否更新。
+  后台收到过期的同源索引时，会保留较新的本地索引。
+- `install name` 安装原生包该平台的 `latest`；`install name@version` 安装指定版本。
+  原生包默认启用本次安装的版本；`--no-switch` 只安装，保留当前启用状态。
+  v0.7.0 的统一 `install` / `remove` 入口支持多个目标，并按目录包的管理器分派；
+  外部包默认全局范围，作用域和参数规则见下方“Python 与 Node.js 包”。
+  原生包下载时显示进度、已下载/总大小和平均下载速度；终端中每 200 毫秒刷新同一行，
   重定向输出时每 5 秒记录一行。下载结束显示最终状态，命中有效缓存时跳过下载。
-- `switch name version` 只切换已安装版本，一起处理包内全部命令。
-- `remove name` 删除当前启用版本；`remove name@version` 删除指定版本；
+- `switch name version` 只切换已安装的原生版本，一起处理包内全部命令。
+- 原生 `remove name` 删除当前启用版本；`remove name@version` 删除指定版本；
   `remove name --all` 删除全部版本。删除启用版本后不自动选择其他版本。
-- `list` 以名称、全部已装版本、维护者三列显示，每个包一行，用 `*` 标记启用版本。
-  维护者优先显示本地索引中的姓名，没有姓名则显示 `@GitHub账号`；索引或对应包信息缺失时
-  显示 `-`。切换、卸载和列出安装状态不需要网络或远端索引。
+  v0.7.0 原生依赖管理提供 `--autoremove` 清理不再需要的自动依赖、`--cascade` 连同
+  反向依赖一起卸载；两者仅限原生包。`-y` / `--yes` 接受确认，**不隐含任何依赖清理**。
+  安装/卸载可用 `--dry-run` 查看计划，不执行修改。
+- `list` 仅列原生安装记录，以名称、管理器、全部已装版本、维护者四列显示，每个包一行，用 `*`
+  标记启用版本；**不盘点 npm/pip 安装**。维护者优先显示本地索引中的姓名，没有姓名则显示
+  `@GitHub账号`；索引或对应包信息缺失时显示 `-`。原生切换、卸载和列出安装状态不需要网络或远端索引。
 - `recover` 恢复中断事务。安装、切换、卸载命令启动时也会自动恢复。
 - `oheco` 自身作为普通包更新和切换；删除 `oheco` 的启用版本也会删除默认 `oo`
   链接，可通过保留的 `oo@版本` 或安装脚本恢复。
 
-`oo` 安装预编译包，不执行包内安装脚本。当前不提供跨包依赖自动解析与安装、源码构建、
-自动升级或服务管理。升级软件时先执行 `oo update`，再执行 `oo install <包名>`；
+`oo` 安装预编译原生产物，不执行原生包内安装脚本；不提供源码构建、自动升级或服务管理。
+v0.7.0 的原生依赖使用下述 schema v5；npm/pip 依赖仍由相应后端实时解析。
+升级软件时先执行 `oo update`，再执行 `oo install <包名>`；
 升级包管理器使用 `oo update && oo install oheco`。
 
 软件目录已收录 Go 原生工具链，可通过 `oo install go` 安装。当前适配包版本为
 `1.27.1-ohos.1`；签名工具、cgo 依赖及宿主配置见
 [Go 适配说明](https://github.com/oheco/go/blob/go1.27.1-ohos.1/misc/harmony/README.md)。
+
+## v0.7.0：逐版本原生依赖
+
+schema v5 在 `versions[].dependencies` 声明依赖，对应
+`Version.Dependencies []Dependency`，字段为 `name`、`constraint`、可选 `version_basis`
+和 `platforms`。例如某个原生版本的字段：
+
+```json
+{
+  "dependencies": [
+    {
+      "name": "go",
+      "constraint": ">=1.27, <1.28",
+      "version_basis": "upstream",
+      "platforms": ["ohos-arm64"]
+    }
+  ]
+}
+```
+
+- 依赖声明属于具体版本，不是整个包；`platforms` 可限定生效平台。不指定 `version_basis`
+  时按 `package`（包版本）比较；`upstream` 要求目标版本显式声明 `upstream_version`，
+  按该字段比较，**不回退到包版本**。
+- 依赖来源和目标都必须是可安装的原生包版本；仅提供项目的版本不能声明或充当原生依赖。
+  npm/pip 包不使用此原生依赖图，其依赖交给后端，不向原生安装状态镜像外部安装记录。
+- 约束支持 `=` / `==` / `!=` / `>` / `>=` / `<` / `<=` / `*`，裸版本表示精确匹配。
+  空白、逗号、`AND`、`&&` 表示 AND；`OR`、`||` 表示 OR，AND 优先。
+  不支持 `^`、`~`、括号、`1.*` 等局部通配符，也不把所有版本强制视为 SemVer。
+- 数字多段版本比较忽略数字补零和末尾零段（如 `01.2.0 = 1.2`）；支持 tmux 风格
+  `3.5 < 3.5a < 3.5b`，预发布排在正式版之前。末尾 `-ohos.N` 在基础版本之后按数字
+  修订号比较，未声明修订号按 `0` 处理。无法识别结构的 opaque 版本只允许精确匹配、
+  `!=` 和 `*`；使用范围比较会报错，不按字符串猜测顺序。
+
+原生解析器以所选平台和已安装/启用状态检查依赖兼容性，再生成安装或卸载计划。
+`--no-switch` 保留同名包的当前启用版本，可以存储带自身依赖的新版本；其依赖仍需与共享运行环境兼容。
+外部 pip/npm 的依赖解析是运行时行为，不承诺为保留的 pip 依赖提供跨 `OHECO_ROOT`
+的反向依赖保护；删除 Python 顶层包不自动删除其依赖。
 
 ## 目录和配置
 
@@ -116,9 +164,12 @@ oo install oheco
 允许包内有效的相对软链接，禁止越界、循环及悬空软链接。
 单包解压上限 8 GiB / 250000 条目，索引上限 32 MiB。
 
-修改操作使用进程锁和持久化事务记录，单条链接通过重命名替换；进程中断后回滚未提交
-操作或完成已提交清理。多个命令的链接逐条切换，不承诺对外同时变化，也不承诺底层
-文件系统不支持的断电持久化。请在鸿蒙宿主执行安装，以保留宿主所需执行权限。
+修改操作使用进程锁和持久化事务记录。原生批次的所有新包先完成暂存与校验，再共同提交；
+事务记录暂存目录的设备号与 inode，回滚只删除本事务实际移入的目录，不删除尚未接管或被替换的目标目录。
+缺少目录身份的旧版未提交日志会保留新增目录并提示人工核对，不冒险删除；已提交操作继续完成清理。
+单条链接通过重命名替换；多个命令的链接逐条切换，不承诺对外同时变化，也不承诺底层
+文件系统不支持的断电持久化。确认提示支持 SIGINT/SIGTERM 取消，取消后不提交卸载。
+请在鸿蒙宿主执行安装，以保留宿主所需执行权限。
 下载缓存不会随卸载删除，可手动删除 `cache/downloads/` 中的缓存文件。
 
 ## 原生构建
@@ -140,17 +191,17 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.6.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
+`OHECO_VERSION` 默认 `0.7.0`（开发版，未发布）。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`
 签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 Linux 侧打包，不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.6.0
+python3 scripts/package.py --version 0.7.0
 ```
 
-输出 `dist/oheco-0.6.0-ohos-arm64.tar.gz` 和 `.sha256`。同名文件不会被覆盖。
-包内包含 `bin/oo`、README 和 MIT 许可证。
+`--version` 省略时同样默认 `0.7.0`。输出 `dist/oheco-0.7.0-ohos-arm64.tar.gz` 和 `.sha256`。
+同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
 
@@ -197,7 +248,9 @@ SDK 按组件收录为 `ohos-sdk-native`、`ohos-sdk-toolchains`、`ohos-sdk-ets
 需另行配置相应运行环境，内置编译工具的宿主执行验证情况见 [验证记录](docs/VALIDATION.md)。
 当前不支持 LLDB，也不创建 lldb-server 等相关链接。
 
-## 从 0.1.0 升级
+## 索引兼容与升级
+
+升级已发布版本仍使用：
 
 ```zsh
 oo update
@@ -205,10 +258,17 @@ oo install oheco
 oo update
 ```
 
-新版默认读取 `index/v4/index.json`，兼容已有 v1/v2/v3 本地索引和安装记录。发布站同时保留
-`index/v1/index.json`、`index/v2/index.json` 和 `index/v3/index.json`，分别只包含对应客户端可识别的包。最新的 oheco
-自举包仍使用 v1 描述，让旧客户端完成升级。
+v0.7.0 源码默认索引地址为 `https://oheco.github.io/oheco-packages/index/v5/index.json`，
+仍兼容 v1–v4 索引。生成的 `index/v1/index.json` 至 `index/v4/index.json` 兼容索引采用
+fail-closed 策略：**移除整个 schema v5 包**，不能只删掉依赖字段而让旧客户端不安全地安装。
+内置自举目录及 `oheco` 自举包继续使用 schema v1，使旧客户端能够取得新客户端；
+此处说明的是开发版协议，并不声明 v0.7.0 或线上 v5 索引已发布。
 安装了 ZIP 或启动器包后应继续使用 0.2.0 或更新的客户端管理它们。
+
+v0.7.0 的原生状态迁移写入 **schema 2**，与目录索引的 schema v5 不同；迁移前的记录保存在
+`state/installed.v1.backup.json`。迁移后，**旧客户端不能再管理同一个 `OHECO_ROOT`**。
+备份仅供核对和手工恢复参考，不是安全的直接降级办法：后续安装、切换或卸载会改变包目录和
+链接，不能把旧备份直接覆盖回 `state/installed.json`；测试旧客户端应使用独立根目录。
 
 SDK 原生验证脚本为 `scripts/test-sdk.zsh`，使用已校验的原始 ZIP 缓存，在隔离目录中测试
 编译、签名、版本链接及离线卸载。隔离目录默认位于主目录，可通过 `OHECO_SDK_TEST_PARENT`
@@ -231,15 +291,34 @@ SDK 的 native 原始 ZIP 含 8 对仅大小写不同且内容不同的 Linux ne
 ```zsh
 oo update
 oo install <目录包名>
-oo pip install <Python包名>
-oo npm install <npm包名>
+oo install npm:<npm包名>             # 统一入口默认全局
+oo install pip:<Python包名>          # 使用选定的基础 Python 环境
+oo install npm:<npm包名> -- --global=false --prefix ./project  # 显式本地范围
+oo install npm:<npm包名> -- --prefix "$HOME/.local"            # 独立目录，仍为全局
+oo remove npm:<npm包名>
+oo remove pip:<Python包名>
+# 保留旧入口兼容：
+oo npm install <npm包名>             # 旧 oo npm 仍默认当前项目
 oo npm install <npm包名> --global
+oo pip install <Python包名>
 ```
 
+统一 `oo install` / `oo remove` 按目录记录选择管理器；`npm:<name>` / `pip:<name>`
+可显式选择生态包。统一入口**默认全局范围**：npm 使用全局目录，pip 使用选定的基础 Python
+环境。作用域参数必须放在 `--` 分隔符之后，不能直接当作 oo 顶层选项。
+`--prefix DIR` **只选择目录，不隐含 local**；统一安装/卸载即便带 prefix 仍默认 global。
+只有显式 `--global=false`、`--no-global`、`--local` 或 `--location=project` 才选择本地范围；
+`-g` / `--global` 显式选择全局。旧 `oo npm` 保留 npm-local 兼容默认值，不随统一入口
+改为全局。安装和卸载时应选择相同的作用域和目录。
+
+`--` 后的参数仅允许用于**单一外部管理器**，不用于原生包或混合管理器操作，作为参数数组传递，
+不经 shell 求值。`--registry`、额外索引、绕过校验或启用安装脚本等源/安全绕过参数仍被拒绝，
+不是任意透传通道。`--autoremove` / `--cascade` 仅用于原生依赖管理；`-y` 只接受确认，不要求
+pip/npm 清理依赖。
+
 语言包安装由所选 Python 的 pip 或 PATH 中的 npm 执行。Python 默认使用 PATH 中的
-`python3`，可通过 `OHECO_PYTHON` 选择虚拟环境解释器；npm 默认安装到当前项目，
-`--global` 使用 npm 的全局目录，`--prefix` 可选择独立目录。安装库时，应选择实际使用它的
-Python 环境或 Node.js 项目。全局 npm 库不会自动成为其他项目的依赖。
+`python3`，可通过 `OHECO_PYTHON` 选择解释器；npm 的 `--prefix` 可选择独立目录。安装库时，
+应选择实际使用它的 Python 环境或 Node.js 项目。全局 npm 库不会自动成为其他项目的依赖。
 
 `oo` 在安装期间启动带随机路径的 loopback HTTP 源。它把目录中收录的同名适配包优先交给
 pip/npm；未收录的依赖通过 PyPI/npm 官方源解析。所有返回的包下载地址都指向临时服务，
@@ -260,9 +339,11 @@ npm 使用 `--omit-lockfile-registry-resolved`，锁文件保留版本和完整�
 中断时 oo 终止自己的包管理器进程组并关闭服务；安装目录遵循 pip/npm 的中断恢复行为，
 需要时重跑安装。
 
-语言环境由 pip/npm 管理，使用 `oo pip list`、`oo npm list` 查询，使用
-`oo pip uninstall <包名>`、`oo npm uninstall <包名>` 卸载。原生 `oo list`、
-`oo switch`、`--no-switch` 和 `命令@版本` 链接适用于原生包；语言包通过安装所需版本切换。
+语言环境及其依赖由 pip/npm 实时解析和管理，不镜像为 oo 的原生安装记录。使用 `oo pip list`、
+`oo npm list` 查询相应环境，使用统一 `oo remove` 或旧 `oo pip uninstall <包名>`、
+`oo npm uninstall <包名>` 卸载，并注意全局/本地作用域。pip 会保留被卸载包的依赖；
+外部后端不保证跨根目录的反向依赖保护。`oo list` 不盘点这些外部安装，`oo switch`、
+`--no-switch` 和 `命令@版本` 链接只适用于原生包；语言包通过安装所需版本切换。
 
 维护者可从最终 wheel/tarball 生成对应字段，避免手写依赖信息：
 
