@@ -57,4 +57,18 @@
 
 ## 发布后确认
 
-发布后用官方索引和官方产物再跑一遍确认，见 `dist/verify-official-0.9.0.py` 的输出日志。此项属于复核，不构成发布门禁。
+发布后（v0.9.0 已成为 Latest、`oheco-packages` Pages 已部署）用官方索引和官方产物再跑了一遍
+`dist/verify-official-0.9.0.py`，全部通过：
+
+- 未设置 `OHECO_INDEX_URL`，走编译期默认索引 `https://oheco.org/index/v5/index.json`，
+  线上 v5 索引中 `oheco` 的 `latest` 为 `0.9.0`，URL / 大小 / SHA-256 与 Release 附件一致。
+- 在隔离的 `OHECO_ROOT` / `HOME` 下 `oo install oheco -y` 升级到正式发布的 0.9.0，
+  `bin/oo --version` 输出 `oo 0.9.0 (ohos/arm64)`。
+- 目录内 npm 包 `deepseek-harness` 用显式 `-- --global` 安装成功：`oo` 没有注入作用域，
+  `~/.npmrc` 的 `prefix` 被 npm 正常使用，`dsh --version` 可运行，`oo search` 显示
+  `<由 npm 管理>`。
+- 目录外的 `npm:is-number@7.0.0` 经 `oo` 转发到真实 registry 安装成功，`require()` 返回
+  预期结果。
+- 两个包都能用相同的 `-- --global` 参数卸载。
+
+此项属于复核，不构成发布门禁；本次复核未发现功能缺陷。
