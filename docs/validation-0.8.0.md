@@ -57,3 +57,27 @@
 - 聚合策略是“按索引顺序、同名文件先到先得”，不做版本择优——第三方包的候选集完全交给用户
   配置的源，oo 只保证目录包不与上游候选混合。
 - 单元与端到端验收都在单机 loopback 上完成，不代表所有企业源、镜像实现或全部 HarmonyOS 设备。
+
+## 0.8.1：官方验收发现的转发缺陷
+
+对正式索引做端到端验收时发现：安装**非目录 npm 包**会失败。
+
+```
+npm error 404 GET http://127.0.0.1:<port>/<nonce>/npm/is-number/-/is-number-7.0.0.tgz
+```
+
+原因是 npm 默认的 `replace-registry-host=npmjs` 会把 tarball 的**主机改写成当前配置的
+registry**（即 oo 的临时源），而 oo 只提供元数据，于是 404。
+
+实测对照（同一 302 转发场景，tarball 位于另一 origin）：
+
+| npm 参数 | 是否向 oo 请求 tarball | 结果 |
+| --- | --- | --- |
+| 默认 | 会 | 404 失败 |
+| `--replace-registry-host=never` | 不会（按元数据里的地址直连） | 成功 |
+
+修复：oo 在 npm 命令上强制 `--replace-registry-host=never`。该缺陷只影响“安装非目录 npm 包”
+这一条路径（目录里的适配包不受影响，因为它们的 tarball 本来就指向非 registry 主机）。
+
+已发布的 `v0.8.0` 产物按不可变约定**未覆盖**，修复随 `v0.8.1` 发布；端到端脚本也已加固——
+转发包的 tarball 现在故意放在**另一个 origin**，若主机被改写则测试失败，从而固化该回归。

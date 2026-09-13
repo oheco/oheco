@@ -45,7 +45,7 @@ OO = args.oo.resolve()
 if not OO.is_file():
     parser.error(f"missing oo binary: {OO}")
 
-STATE = {"npm_packument": 0, "npm_tarball": 0, "npm_auth": [], "release": 0,
+STATE = {"npm_packument": 0, "npm_cdn_tarball": 0, "npm_auth": [], "release": 0,
          "pip_json": 0, "pip_html": 0, "pip_wheel": 0}
 
 
@@ -104,7 +104,12 @@ def sha256(data):
 with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
     work = Path(temporary)
     port = free_port()
+    cdn_port = free_port()
     base = f"http://127.0.0.1:{port}"
+    # The forwarded tarball lives on a DIFFERENT origin on purpose: npm's default
+    # replace-registry-host=npmjs rewrites tarball hosts to the configured
+    # registry (oo), which only serves metadata and would answer 404.
+    cdn_base = f"http://127.0.0.1:{cdn_port}"
 
     catalog_npm = "oo-accept-npm"
     catalog_tar = npm_tarball(catalog_npm, "1.0.0")
@@ -156,7 +161,7 @@ with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
         manifest = {"name": name, "version": "1.0.0", "main": "index.js"}
         return {"name": name, "dist-tags": {"latest": "1.0.0"},
                 "versions": {"1.0.0": dict(manifest, dist={
-                    "tarball": f"{base}/npm/{name}/-/{filename}", "integrity": "sha256-" + base64.b64encode(
+                    "tarball": f"{cdn_base}/cdn/{filename}", "integrity": "sha256-" + base64.b64encode(
                         bytes.fromhex(sha256(tarball_bytes))).decode(),
                     "shasum": sha256(tarball_bytes)})}}
 
@@ -190,9 +195,6 @@ with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
                 STATE["npm_packument"] += 1
                 STATE["npm_auth"].append(self.headers.get("authorization"))
                 return self._send(json.dumps(forward_packument).encode(), "application/json")
-            if path == f"/npm/{forward_npm}/-/{forward_npm}-1.0.0.tgz":
-                STATE["npm_tarball"] += 1
-                return self._send(forward_tar, "application/octet-stream")
             # fake pip indexes: A answers PEP 691 JSON, B answers PEP 503 HTML
             if path == f"/simpleA/{agg_root}/":
                 STATE["pip_json"] += 1
@@ -218,8 +220,26 @@ with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
                 return self._send(data, "application/octet-stream")
             self.send_error(404)
 
+    class Cdn(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path == f"/cdn/{forward_npm}-1.0.0.tgz":
+                STATE["npm_cdn_tarball"] += 1
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(forward_tar)))
+                self.end_headers()
+                self.wfile.write(forward_tar)
+                return
+            self.send_error(404)
+
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    cdn = http.server.ThreadingHTTPServer(("127.0.0.1", cdn_port), Cdn)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=cdn.serve_forever, daemon=True).start()
 
     home = work / "home"
     root = work / "root"
@@ -283,7 +303,8 @@ with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
 
         # --- npm: other names are forwarded to the user's registry (anonymously)
         out = run(oo, "install", f"npm:{forward_npm}@1.0.0", "-y")
-        assert STATE["npm_packument"] > 0 and STATE["npm_tarball"] > 0, "forwarded registry was not used"
+        assert STATE["npm_packument"] > 0, "forwarded registry was not used for metadata"
+        assert STATE["npm_cdn_tarball"] > 0, "tarball host was rewritten instead of using the packument URL"
         assert "anonymous" in out, "credentials were configured but no anonymous warning was printed"
         assert all(value is None for value in STATE["npm_auth"]), \
             f"credentials leaked to the forwarded registry: {STATE['npm_auth']}"
@@ -320,6 +341,8 @@ with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
             print("\nFAIL:", failures[0], flush=True)
         server.shutdown()
         server.server_close()
+        cdn.shutdown()
+        cdn.server_close()
         if not failures:
             print("\nPASS language download model (A1 npm + P2 pip) with isolated fixtures", flush=True)
     sys.exit(1 if failures else 0)

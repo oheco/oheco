@@ -2,7 +2,8 @@
 
 鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
-> **v0.8.0** 改变了语言包的下载模型：oo 只提供元数据——目录里的适配包直连其发布地址
+> **v0.8.1** 修正了 0.8.0 的转发缺陷（npm 默认会把 tarball 主机改写成配置的 registry，
+> 导致非目录包 404），并继承 0.8.0 的下载模型变更：oo 只提供元数据——目录里的适配包直连其发布地址
 > （npm 用 `integrity`、pip 用 `#sha256=` 校验），其余包名转发到用户自己配置的源。oo
 > **不再代理下载、不再校验第三方字节**，也不再屏蔽用户的 npmrc / pip.conf。详见下文
 > “Python 与 Node.js 包”。
@@ -195,16 +196,16 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.8.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
+`OHECO_VERSION` 默认 `0.8.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
 `ohos-sdk-toolchains` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 打包不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.8.0
+python3 scripts/package.py --version 0.8.1
 ```
 
-`--version` 省略时同样默认 `0.8.0`。输出 `dist/oheco-0.8.0-ohos-arm64.tar.gz` 和 `.sha256`。
+`--version` 省略时同样默认 `0.8.1`。输出 `dist/oheco-0.8.1-ohos-arm64.tar.gz` 和 `.sha256`。
 同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成

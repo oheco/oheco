@@ -634,7 +634,7 @@ func TestUnifiedNpmForwardsOwnRegistryWithoutConfigInjection(t *testing.T) {
 	if !languageContainsSequence(argv, []string{"--@scope:registry=" + registryArg}) {
 		t.Fatalf("missing catalog scope override: %q", argv)
 	}
-	for _, flag := range []string{"--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--omit-lockfile-registry-resolved", "--fetch-retries=0"} {
+	for _, flag := range []string{"--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--omit-lockfile-registry-resolved", "--fetch-retries=0", "--replace-registry-host=never"} {
 		if !languageContainsSequence(argv, []string{flag}) {
 			t.Fatalf("missing npm policy flag %s: %q", flag, argv)
 		}

@@ -607,8 +607,10 @@ func languageCommand(tool languageToolchain, command string, targets, args []str
 	argv = append(argv, args...)
 	if tool.backend == "npm" {
 		// The user's own npmrc is honoured now; only verification-independent
-		// policy stays forced here.
-		argv = append(argv, "--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--omit-lockfile-registry-resolved", "--fetch-retries=0")
+		// policy stays forced here. replace-registry-host=never is required:
+		// npm's default rewrites tarball hosts to the configured registry (oo),
+		// which only serves metadata and would answer 404.
+		argv = append(argv, "--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--omit-lockfile-registry-resolved", "--fetch-retries=0", "--replace-registry-host=never")
 		if registryURL != "" {
 			argv = append(argv, "--registry="+registryURL+"/npm/")
 			for _, scope := range scopes {
