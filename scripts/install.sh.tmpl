@@ -1,6 +1,13 @@
 #!/usr/bin/zsh
 # Generated from the validated oheco package descriptor. Requires zsh, curl, tar,
 # sha256sum (or shasum), and the usual mkdir/mktemp/chmod/rm/cat utilities.
+#
+# Options (environment variables):
+#   OHECO_ROOT=path          installation root, default ~/.oheco
+#   OHECO_NO_MODIFY_PATH=1   never write the PATH block into .zshrc
+#   OHECO_NO_MODIFY_ENV=1    never write the XDG/TMPDIR block into .zshrc
+#   OHECO_ASSUME_YES=1       answer yes to both questions instead of prompting
+# Without a terminal the installer asks nothing and edits no configuration.
 oo_install() {
   emulate -L zsh
   setopt ERR_EXIT NO_UNSET PIPE_FAIL
@@ -8,8 +15,27 @@ oo_install() {
   local oo_url=@@URL@@
   local oo_sha256=@@SHA256@@
   local oo_root=${OHECO_ROOT:-$HOME/.oheco}
-  local oo_temp='' oo_actual oo_rc oo_marker='# oheco: command path'
-  local oo_bin_path oo_path_line oo_rc_content=''
+  local oo_temp='' oo_actual oo_rc oo_rc_content='' oo_active='' oo_line
+  local oo_bin_path oo_bin_ref oo_path_line oo_path_block
+  local oo_path_marker='# oheco: command path'
+  local oo_env_marker='# oheco: private directories'
+  local oo_cache_dir='/data/storage/el2/base/haps/entry/cache'
+  local oo_config_dir='/data/storage/el2/base/haps/entry/files'
+  local oo_temp_dir='/data/storage/el2/base/haps/entry/temp'
+  local oo_configured=0 oo_env_missing=0 oo_path_changed=0 oo_env_changed=0
+  # Answer one yes/no question on the controlling terminal; Enter means yes.
+  # Unattended runs answer no, so a piped installer never edits configuration
+  # unless OHECO_ASSUME_YES=1 asks it to.
+  oo_confirm() {
+    local oo_reply=''
+    if [[ ${OHECO_ASSUME_YES:-0} = 1 ]]; then
+      return 0
+    fi
+    [[ -r /dev/tty && -w /dev/tty && ( -t 1 || -t 2 ) ]] || return 1
+    print -n -- "$1 [Y/n] " > /dev/tty
+    read -r oo_reply < /dev/tty || oo_reply=''
+    [[ $oo_reply != (n|N|no|No|nO|NO) ]]
+  }
   if [[ $(uname -s) != HarmonyOS || $(uname -m) != (aarch64|arm64) ]]; then
     print -u2 'oheco currently supports HarmonyOS arm64. Run this installer in the native host terminal.'
     return 1
@@ -53,17 +79,71 @@ OHECO_PACKAGE_MANIFEST
       print -u2 'oo was installed; index download failed. Run oo update when the source is available.'
     fi
     oo_bin_path="$oo_root/bin"
+    # Keep $HOME in the rc entry so it survives a moved home directory; custom
+    # OHECO_ROOT locations are written as their resolved absolute path.
+    if [[ $oo_root = "$HOME/.oheco" ]]; then
+      oo_bin_ref='$HOME/.oheco/bin'
+    else
+      oo_bin_ref="$oo_bin_path"
+    fi
     oo_path_line="export PATH=${(q)oo_bin_path}:\$PATH"
+    oo_path_block=$(print -rl -- 'case ":$PATH:" in' \
+      "  *\":$oo_bin_ref:\"*) ;;" \
+      "  *) export PATH=\"$oo_bin_ref:\$PATH\" ;;" \
+      'esac')
+    oo_rc="${ZDOTDIR:-$HOME}/.zshrc"
+    [[ -f $oo_rc ]] && oo_rc_content=$(<"$oo_rc")
+    # Only active lines count as configured; earlier runs may leave comments.
+    for oo_line in ${(f)oo_rc_content}; do
+      [[ $oo_line = [[:space:]]#'#'* ]] && continue
+      oo_active+="$oo_line"$'\n'
+    done
     if [[ ${OHECO_NO_MODIFY_PATH:-0} != 1 ]]; then
-      oo_rc="${ZDOTDIR:-$HOME}/.zshrc"
-      [[ -f $oo_rc ]] && oo_rc_content=$(<"$oo_rc")
-      if [[ $oo_rc_content != *"$oo_path_line"* ]]; then
-        mkdir -p -- "${oo_rc:h}"
-        print -rl -- '' "$oo_marker" "$oo_path_line" >> "$oo_rc"
-        print "Added PATH configuration to $oo_rc"
+      if [[ $oo_active = *"$oo_bin_ref"* || ( $oo_active = *"$oo_bin_path"* && $oo_rc_content != *"$oo_path_line"* ) ]]; then
+        oo_configured=1
       fi
-      print 'New zsh terminals will find oo automatically. To load the configuration now, run:'
+      if (( oo_configured )); then
+        print "PATH is already configured in $oo_rc"
+      elif [[ $oo_rc_content = *"$oo_path_line"* ]]; then
+        # Upgrade the pre-guard line written by earlier installers.
+        oo_rc_content=${oo_rc_content//"$oo_path_line"/"$oo_path_block"}
+        print -r -- "$oo_rc_content" > "$oo_rc"
+        oo_path_changed=1
+        print "Updated the PATH entry in $oo_rc"
+      elif oo_confirm "Add $oo_bin_ref to PATH in $oo_rc?"; then
+        mkdir -p -- "${oo_rc:h}"
+        print -rl -- '' "$oo_path_marker" "$oo_path_block" >> "$oo_rc"
+        oo_path_changed=1
+        print "Added the PATH configuration to $oo_rc"
+      else
+        print 'Skipped the PATH configuration.'
+      fi
+    fi
+    if [[ ${OHECO_NO_MODIFY_ENV:-0} != 1 ]]; then
+      for oo_line in "XDG_CACHE_HOME=$oo_cache_dir" "XDG_CONFIG_HOME=$oo_config_dir" "TMPDIR=$oo_temp_dir"; do
+        [[ $oo_active = *"$oo_line"* ]] || oo_env_missing=1
+      done
+      if (( ! oo_env_missing )); then
+        print "The app directories are already configured in $oo_rc"
+      elif oo_confirm "Add XDG_CACHE_HOME, XDG_CONFIG_HOME and TMPDIR for the app directories to $oo_rc?"; then
+        mkdir -p -- "${oo_rc:h}"
+        print -rl -- '' "$oo_env_marker" \
+          "export XDG_CACHE_HOME=$oo_cache_dir" \
+          "export XDG_CONFIG_HOME=$oo_config_dir" \
+          "export TMPDIR=$oo_temp_dir" >> "$oo_rc"
+        oo_env_changed=1
+        print "Added the XDG/TMPDIR configuration to $oo_rc"
+      else
+        print 'Skipped the XDG/TMPDIR configuration.'
+      fi
+    fi
+    if (( oo_path_changed || oo_env_changed )); then
+      print 'New zsh terminals apply this configuration automatically. To load it now, run:'
       print -r -- "  source ${(q)oo_rc}"
+    fi
+    if (( oo_env_changed )); then
+      print 'To use the app directories in the current terminal, run:'
+      print -r -- "  export XDG_CACHE_HOME=$oo_cache_dir XDG_CONFIG_HOME=$oo_config_dir TMPDIR=$oo_temp_dir"
     fi
     # curl | zsh runs in a child process and cannot change its parent's PATH.
     print 'Installed. To enable oo only in the current terminal, run:'

@@ -9,6 +9,9 @@ trap 'rm -rf -- "$test_root"' EXIT
 export OHECO_ROOT="$test_root/root with spaces"
 export OHECO_INDEX_URL=http://127.0.0.1:18808/index/v2/index.json
 export ZDOTDIR="$test_root/zsh"
+# Answer both configuration questions with yes; the installer has its own
+# dedicated prompt test for the interactive paths.
+export OHECO_ASSUME_YES=1
 mkdir -p "$ZDOTDIR"
 print -r -- '# existing user configuration' > "$ZDOTDIR/.zshrc"
 curl -fsSL http://127.0.0.1:18808/install.sh | zsh
@@ -30,6 +33,11 @@ curl -fsSL http://127.0.0.1:18808/install.sh | zsh
 rc_content=$(<"$ZDOTDIR/.zshrc")
 [[ $rc_content = *'# existing user configuration'* ]]
 [[ ${#${(M)${(f)rc_content}:#'# oheco: command path'}} = 1 ]]
+[[ ${#${(M)${(f)rc_content}:#'# oheco: private directories'}} = 1 ]]
+[[ $rc_content = *'export XDG_CACHE_HOME=/data/storage/el2/base/haps/entry/cache'* ]]
+[[ $rc_content = *'export XDG_CONFIG_HOME=/data/storage/el2/base/haps/entry/files'* ]]
+[[ $rc_content = *'export TMPDIR=/data/storage/el2/base/haps/entry/temp'* ]]
+[[ $rc_content = *'case ":$PATH:" in'* ]]
 zsh -f -c 'source "$ZDOTDIR/.zshrc"; command -v oo; oo --version'
 # A normal new interactive zsh must load .zshrc without an explicit source.
 zsh -i -c '[[ $(command -v oo) = "$OHECO_ROOT/bin/oo" ]] && oo --version'

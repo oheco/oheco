@@ -20,11 +20,35 @@ curl -fsSL https://oheco.org/install.sh | zsh
 ```
 
 安装器依赖 `curl`、`tar`、`sha256sum`（或 `shasum`）及基础文件命令，不依赖 Go、Git
-或 jq。安装成功后，脚本自动把 `~/.oheco/bin` 添加到 `${ZDOTDIR:-$HOME}/.zshrc` 的 PATH
-配置；自定义 `OHECO_ROOT` 时写入对应的 `bin` 目录。保留原有配置，重复安装不重复写入。
-新开的 zsh 终端自动生效；当前终端执行 `source "${ZDOTDIR:-$HOME}/.zshrc"` 即可使用 `oo`，
-也可以按脚本输出直接设置 PATH。`curl | zsh` 的子进程无法直接修改当前终端的环境。
-`OHECO_NO_MODIFY_PATH=1` 可关闭配置文件修改。已有工具不会因索引同步失败被删除。
+或 jq。组件安装完成后，脚本在两个独立的问题里询问是否修改
+`${ZDOTDIR:-$HOME}/.zshrc`，回车即同意，也可以分别拒绝：
+
+1. 是否把 `~/.oheco/bin` 加入 PATH，写入的是幂等的判断而不是直接追加：
+
+   ```zsh
+   # oheco: command path
+   case ":$PATH:" in
+     *":$HOME/.oheco/bin:"*) ;;
+     *) export PATH="$HOME/.oheco/bin:$PATH" ;;
+   esac
+   ```
+
+   自定义 `OHECO_ROOT` 时写对应的 `bin` 目录（绝对路径）。
+2. 是否写入应用私有目录的环境变量：
+
+   ```zsh
+   # oheco: private directories
+   export XDG_CACHE_HOME=/data/storage/el2/base/haps/entry/cache
+   export XDG_CONFIG_HOME=/data/storage/el2/base/haps/entry/files
+   export TMPDIR=/data/storage/el2/base/haps/entry/temp
+   ```
+
+保留原有配置，重复安装不重复写入；早期安装器写入的 `export PATH=...` 行会原地升级成上面的
+判断形式。新开的 zsh 终端自动生效；当前终端执行 `source "${ZDOTDIR:-$HOME}/.zshrc"` 即可
+使用 `oo`，也可以按脚本输出直接设置 PATH 和三个变量。`curl | zsh` 的子进程无法直接修改
+当前终端的环境；没有终端可用时（例如在脚本里非交互执行）安装器不询问、也不修改配置文件，
+只打印手工配置命令。`OHECO_NO_MODIFY_PATH=1`、`OHECO_NO_MODIFY_ENV=1` 可分别关闭这两处
+修改，`OHECO_ASSUME_YES=1` 让两个问题都按同意处理。已有工具不会因索引同步失败被删除。
 
 使用自定义安装目录时，先在 `${ZDOTDIR:-$HOME}/.zshrc` 中添加以下配置，将示例目录
 替换为实际安装目录的绝对路径：
@@ -34,7 +58,7 @@ export OHECO_ROOT="$HOME/tools/oheco"
 ```
 
 执行 `source "${ZDOTDIR:-$HOME}/.zshrc"` 加载配置后，再运行上面的安装命令。
-安装器只自动配置 PATH，后续终端必须继续导出相同的 `OHECO_ROOT`；未设置时，
+安装器不会写入 `OHECO_ROOT`，后续终端必须继续导出相同的 `OHECO_ROOT`；未设置时，
 `oo` 使用默认的 `~/.oheco`，不会根据可执行文件所在位置推断安装目录。
 
 ## 使用

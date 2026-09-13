@@ -64,6 +64,9 @@ SDK 和安装器集成测试的隔离目录已清理。
 - Go 重定位：清除 GOROOT 后，通过默认链接得到版本目录内的 GOROOT，GOOS 为 ohos。
 - 已安装 Go：`go version`、`gofmt@1.27.1 -h`、编译/签名/运行一个 Go 程序。
 - 重复执行安装脚本：保留已有 zsh 配置，不重复写入同一路径；新 zsh 能找到 oo。
+- 安装脚本配置分支：PATH 与 XDG/TMPDIR 分两次询问，无终端时不修改配置，历史
+  `export PATH=` 行原地升级为 `case` 判断；`scripts/test-installer-config-native.py`
+  覆盖同意、拒绝、非交互和迁移四条路径。
 - 删除本地索引后：切换 Go、卸载 Go、清理 go/gofmt 两种链接、保留并切换 oheco。
 
 原始输出保留在忽略目录 `build/test-host.log`、`build/e2e-host.log` 和
@@ -94,6 +97,12 @@ wait "$oo_fixture_pid" || true
 
 fixture 只改写忽略目录内的索引 URL，不修改正式描述；使用真实的已签名软件包。
 它监听本机 `127.0.0.1:18808`，可在独立终端前台启动，确认 ready 后再执行测试。
+
+安装脚本的配置分支自带 loopback fixture，不依赖发行包，可单独复现：
+
+```sh
+python3 scripts/test-installer-config-native.py
+```
 
 ## 索引和下载站
 
