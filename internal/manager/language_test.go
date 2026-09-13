@@ -59,7 +59,7 @@ func TestLanguageInstallUsesNpmAndPreservesUserConfig(t *testing.T) {
 	}
 	b, _ := json.Marshal(idx)
 	os.WriteFile(filepath.Join(m.Root, "index", "index.json"), b, 0644)
-	if err := m.InstallLanguage(context.Background(), idx, "npm", []string{"oo-language-fixture@1.0.0"}, LanguageOptions{Args: []string{"--global=false", "--prefix", dir}, Yes: true}); err != nil {
+	if err := m.InstallLanguage(context.Background(), idx, "npm", []string{"oo-language-fixture@1.0.0"}, LanguageOptions{Yes: true}); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	cmd := exec.Command("node", "-e", "console.log(require('oo-language-fixture'))")
@@ -79,7 +79,7 @@ func TestLanguageInstallUsesNpmAndPreservesUserConfig(t *testing.T) {
 	if err != nil || !bytes.Equal(got, config) {
 		t.Fatal("user configuration changed")
 	}
-	if err := m.Language(context.Background(), "npm", []string{"uninstall", "oo-language-fixture"}); err != nil {
+	if err := m.RemoveLanguage(context.Background(), "npm", []string{"oo-language-fixture"}, LanguageOptions{Yes: true}); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "node_modules", "oo-language-fixture")); !os.IsNotExist(err) {
@@ -187,32 +187,42 @@ func languageWheel(t *testing.T, name, dependency string) []byte {
 	return data.Bytes()
 }
 
-func TestLanguageRejectsRegistryBypasses(t *testing.T) {
-	for _, args := range [][]string{{"install", "https://example.com/a.tgz"}, {"install", "foo", "--registry=https://example.com"}, {"install", "foo", "--ignore-scripts=false"}, {"install", "foo@git+https://example.com/foo.git"}, {"publish"}} {
-		if validateLanguageArgs("npm", args) == nil {
-			t.Fatalf("accepted %v", args)
+func TestLanguageRejectsSourceAndScriptBypasses(t *testing.T) {
+	for _, args := range [][]string{
+		{"--registry=https://evil.invalid"},
+		{"--userconfig", "npmrc"},
+		{"--globalconfig=/tmp/npmrc"},
+		{"--ignore-scripts=false"},
+		{"--script-shell=/tmp/script"},
+		{"--workspace=other"},
+		{"--node-options=--require=/tmp/evil.js"},
+		{"https://evil.invalid/a.tgz"},
+		{"other-root"},
+	} {
+		if err := validateLanguageOptions("npm", args); err == nil {
+			t.Fatalf("npm accepted %v", args)
 		}
 	}
-	for _, args := range [][]string{{"install", "pkg @ https://example.com/a.whl"}, {"install", "-r", "requirements.txt"}, {"install", "pkg", "--extra-index-url=https://example.com"}} {
-		if validateLanguageArgs("pip", args) == nil {
-			t.Fatalf("accepted %v", args)
+	for _, args := range [][]string{
+		{"--index-url=https://evil.invalid"},
+		{"--extra-index-url=https://evil.invalid"},
+		{"--find-links=./wheels"},
+		{"-r", "requirements.txt"},
+		{"--only-binary=:none:"},
+		{"--no-binary=:all:"},
+		{"--isolated"},
+		{"--python=/other/python"},
+		{"pkg @ https://evil.invalid/a.whl"},
+		{"./pkg.whl"},
+	} {
+		if err := validateLanguageOptions("pip", args); err == nil {
+			t.Fatalf("pip accepted %v", args)
 		}
 	}
-	dir := t.TempDir()
-	// Registry settings are honoured and forwarded now, so a scoped external
-	// registry in the project .npmrc is accepted rather than rejected.
-	os.WriteFile(filepath.Join(dir, ".npmrc"), []byte("@scope:registry=https://example.com\n"), 0600)
-	if err := checkNpmProject(dir); err != nil {
-		t.Fatalf("rejected forwarded scoped registry: %v", err)
+	if err := validateLanguageTargets("npm", []string{"https://evil.invalid/a.tgz", "git+https://evil.invalid/x.git", "file:/tmp/a"}, true); err == nil {
+		t.Fatal("accepted an npm target that is not a registry package name")
 	}
-	os.Remove(filepath.Join(dir, ".npmrc"))
-	// lockfile sources must be HTTPS; plaintext stays unusable even on loopback.
-	os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"packages":{"node_modules/foo":{"resolved":"http://127.0.0.1:9999/foo.tgz"}}}`), 0600)
-	if err := checkNpmProject(dir); err == nil || !strings.Contains(err.Error(), "unusable source URL") {
-		t.Fatalf("accepted stale temporary registry: %v", err)
-	}
-	os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{"packages":{"node_modules/foo":{"resolved":"https://registry.npmjs.org/foo/-/foo-1.0.0.tgz"}}}`), 0600)
-	if err := checkNpmProject(dir); err != nil {
-		t.Fatalf("rejected https lockfile source: %v", err)
+	if err := validateLanguageTargets("pip", []string{"pkg @ https://evil.invalid/a.whl", "./pkg.whl"}, true); err == nil {
+		t.Fatal("accepted a pip target that is not a named requirement")
 	}
 }

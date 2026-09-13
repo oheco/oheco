@@ -318,7 +318,7 @@ func (m *Manager) List() error {
 	if err := table.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintln(m.Out, "npm/pip: installations are managed by their respective package managers; use oo npm list --global or oo pip list.")
+	fmt.Fprintln(m.Out, "npm/pip: installations are managed by their respective package managers; run npm list or pip list directly.")
 	return nil
 }
 

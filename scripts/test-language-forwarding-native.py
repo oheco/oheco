@@ -293,8 +293,11 @@ with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
         run(oo, "update")
 
         # --- npm: catalog package is downloaded by npm from the described URL
+        # oo no longer injects a scope, so a global install must say so itself.
+        # The npmrc `prefix` below is what proves the user's configuration is
+        # honoured rather than shadowed by oo.
         release_before = STATE["release"]
-        run(oo, "install", "accept-npm", "-y")
+        run(oo, "install", "accept-npm", "-y", "--", "--global")
         assert STATE["release"] > release_before, "catalog tarball was not fetched from its described URL"
         assert STATE["npm_packument"] == 0, "catalog package metadata leaked to the forwarded registry"
         assert (npm_prefix / "lib/node_modules" / catalog_npm / "index.js").is_file(), \
@@ -302,7 +305,7 @@ with tempfile.TemporaryDirectory(prefix="oo forward acceptance ") as temporary:
         print("PASS npm catalog package: npm fetched the described tarball into the npmrc prefix", flush=True)
 
         # --- npm: other names are forwarded to the user's registry (anonymously)
-        out = run(oo, "install", f"npm:{forward_npm}@1.0.0", "-y")
+        out = run(oo, "install", f"npm:{forward_npm}@1.0.0", "-y", "--", "--global")
         assert STATE["npm_packument"] > 0, "forwarded registry was not used for metadata"
         assert STATE["npm_cdn_tarball"] > 0, "tarball host was rewritten instead of using the packument URL"
         assert "anonymous" in out, "credentials were configured but no anonymous warning was printed"

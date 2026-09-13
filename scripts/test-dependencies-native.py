@@ -233,7 +233,8 @@ def main():
             assert not (root / "packages/oo-e2e-app/1.0.0").exists()
             oo("install", npm["name"], pip_root["name"], "--", "--prefix", str(work / "unused"), success=False)
             npm_prefix = work / "npm global prefix"
-            oo("install", npm["name"], "-y", "--", "--prefix", str(npm_prefix))
+            # oo injects no scope: ask for the global layout explicitly.
+            oo("install", npm["name"], "-y", "--", "--global", "--prefix", str(npm_prefix))
             assert (npm_prefix / "lib/node_modules/oo-e2e-npm/package.json").exists(), "npm did not use global mode"
             assert "npm fixture works" in run([npm_prefix / "bin/oo-e2e-npm"], env)
             # A deliberately selected, isolated Python environment is safe for
@@ -254,7 +255,7 @@ def main():
             server.shutdown()
             server.server_close()
             thread.join()
-            oo("remove", npm["name"], "-y", "--", "--prefix", str(npm_prefix))
+            oo("remove", npm["name"], "-y", "--", "--global", "--prefix", str(npm_prefix))
             assert not (npm_prefix / "lib/node_modules/oo-e2e-npm").exists()
             oo("remove", pip_root["name"], "-y", selected_env=pyenv)
             run([python, "-c", "import importlib.util, oo_e2e_python_dep; assert importlib.util.find_spec('oo_e2e_python_root') is None"], pyenv)

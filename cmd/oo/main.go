@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.8.1"
+var version = "0.9.0"
 
 const help = `oo — the oheco package manager
 
@@ -26,8 +26,6 @@ Usage:
   oo remove <package[@version]>... [--all] [--autoremove] [--cascade] [-y] [--dry-run] [-- backend-args]
   oo list                            List installed versions (* = active)
   oo recover                         Recover an interrupted operation
-  oo pip <command> [arguments]        Run pip through oo's temporary source
-  oo npm <command> [arguments]        Run npm through oo's temporary registry
   oo --version
 
 install activates the selected version unless --no-switch is given.
@@ -40,22 +38,23 @@ Commands also refresh the index in the background without waiting.
 Native dependency plans are checked before installation; --yes accepts a reviewed
 plan without prompting. --autoremove includes unused automatic native dependencies;
 --cascade also removes native reverse dependents. Neither is implied by --yes.
-Language packages use npm global / the selected base Python environment by default.
-Arguments after -- are passed as argv to the one selected external manager; scope
-options override the default. Options bypassing verified downloads are rejected.
+Language packages use the backend's own default scope: npm installs into the
+current project unless --global follows --, and pip uses the selected
+interpreter environment. Arguments after -- are passed as argv to the one
+selected external manager. Options that would bypass oo's own metadata source
+are rejected; oo adds only source, correctness and script/wheel-safety settings.
 Use npm:<name> / pip:<name> to explicitly select an ecosystem package.
 <由 npm/pip 管理> denotes ownership, not an assertion that the package is installed.
 Only native packages have oo receipts, versioned links and dependency cleanup.
 npm/pip own their dependency resolution; oo does not guarantee external reverse-
 dependency protection, and pip dependencies are retained on removal.
 Only wheels and prebuilt npm packages are supported; npm scripts are disabled.
-Legacy oo npm / oo pip remain available (oo npm keeps its original local default).
 
 Environment:
   OHECO_ROOT        Installation root (default: ~/.oheco)
   OHECO_INDEX_URL   Index URL (default: https://oheco.org/index/v5/index.json)
   OHECO_NO_AUTO_UPDATE=1  Disable background index updates
-  OHECO_PYTHON      Python executable for oo pip (default: python3 from PATH)
+  OHECO_PYTHON      Python executable for pip operations (default: python3 from PATH)
 `
 
 func main() {
@@ -92,8 +91,6 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		return m.Export(ctx, spec, project, destination)
-	case "pip", "npm":
-		return m.Language(ctx, command, args)
 	case "update":
 		if len(args) != 0 {
 			break

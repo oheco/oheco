@@ -24,7 +24,7 @@ func TestUnifiedLanguageOptionSafety(t *testing.T) {
 	}
 	for backend, cases := range bad {
 		for _, args := range cases {
-			if err := validateLanguageOptions(backend, args, false); err == nil {
+			if err := validateLanguageOptions(backend, args); err == nil {
 				t.Errorf("%s accepted %q", backend, args)
 			}
 		}
@@ -39,10 +39,10 @@ func TestUnifiedLanguageOptionsPreserveArgv(t *testing.T) {
 	for backend, cases := range good {
 		for _, args := range cases {
 			before := append([]string{}, args...)
-			if err := validateLanguageOptions(backend, args, false); err != nil {
+			if err := validateLanguageOptions(backend, args); err != nil {
 				t.Errorf("%s rejected %q: %v", backend, args, err)
 			}
-			argv := languageCommand(languageToolchain{backend: backend}, "install", []string{"root"}, args, true, "http://127.0.0.1/nonce", nil)
+			argv := languageCommand(languageToolchain{backend: backend}, "install", []string{"root"}, args, "http://127.0.0.1/nonce", nil)
 			if !reflect.DeepEqual(before, args) || !languageContainsSequence(argv, args) {
 				t.Errorf("modified argv: before=%q after=%q command=%q", before, args, argv)
 			}
@@ -50,50 +50,54 @@ func TestUnifiedLanguageOptionsPreserveArgv(t *testing.T) {
 	}
 }
 
-func TestUnifiedNpmScopeDefaults(t *testing.T) {
+// TestUnifiedLanguageInjectedArgvExactly pins the complete set of arguments oo
+// adds. Nothing else may be injected: no scope override, no audit/fund/retry
+// policy, and no legacy-only flags.
+func TestUnifiedLanguageInjectedArgvExactly(t *testing.T) {
+	const url = "http://127.0.0.1:43210"
+	scopes := []string{"@scope"}
 	for _, tc := range []struct {
-		args             []string
-		global, explicit bool
+		name             string
+		backend, command string
+		targets, args    []string
+		registryURL      string
+		scopes           []string
+		want             []string
 	}{
-		{nil, true, false},
-		{[]string{"--global=false"}, false, true},
-		{[]string{"--location=project"}, false, true},
-		{[]string{"--prefix", "/tmp/global with spaces"}, true, false},
-		{[]string{"--prefix=/tmp/global with spaces"}, true, false},
-		{[]string{"--global=false", "--prefix", "/tmp/local with spaces"}, false, true},
-		{[]string{"--global", "--prefix", "/tmp/global with spaces"}, true, true},
-		{[]string{"-g"}, true, true},
-		{[]string{"--no-global"}, false, true},
-		{[]string{"--location", "global"}, true, true},
-		{[]string{"--global=false", "--global=true"}, true, true},
+		{
+			name: "npm install", backend: "npm", command: "install",
+			targets: []string{"root@1.0.0"}, args: []string{"--unknown-ordinary-option=value"},
+			registryURL: url, scopes: scopes,
+			want: []string{"install", "root@1.0.0", "--unknown-ordinary-option=value", "--ignore-scripts", "--omit-lockfile-registry-resolved", "--replace-registry-host=never",
+				"--registry=" + url + "/npm/", "--@scope:registry=" + url + "/npm/"},
+		},
+		{
+			name: "npm uninstall", backend: "npm", command: "uninstall",
+			targets: []string{"root"},
+			want:    []string{"uninstall", "root", "--ignore-scripts", "--offline"},
+		},
+		{
+			name: "pip install", backend: "pip", command: "install",
+			targets: []string{"root==1.0.0"}, registryURL: url,
+			want: []string{"-B", "-m", "pip", "install", "root==1.0.0", "--index-url=" + url + "/simple/", "--only-binary=:all:"},
+		},
+		{
+			name: "pip uninstall", backend: "pip", command: "uninstall",
+			targets: []string{"root"},
+			want:    []string{"-B", "-m", "pip", "uninstall", "root", "--yes"},
+		},
 	} {
-		global, explicit, _, err := npmScope(tc.args, true)
-		if err != nil || global != tc.global || explicit != tc.explicit {
-			t.Errorf("scope %q = %v,%v,%v", tc.args, global, explicit, err)
-		}
-		argv := languageCommand(languageToolchain{backend: "npm"}, "install", []string{"root@1.0.0"}, tc.args, true, "http://127.0.0.1", nil)
-		n := 0
-		for _, a := range argv {
-			if a == "--global" {
-				n++
+		t.Run(tc.name, func(t *testing.T) {
+			argv := languageCommand(languageToolchain{backend: tc.backend}, tc.command, tc.targets, tc.args, tc.registryURL, tc.scopes)
+			if !reflect.DeepEqual(argv, tc.want) {
+				t.Fatalf("argv = %q, want %q", argv, tc.want)
 			}
-		}
-		want := 0
-		if !tc.explicit {
-			want++
-		}
-		for _, a := range tc.args {
-			if a == "--global" {
-				want++
+			for _, removed := range []string{"--global", "--no-audit", "--no-fund", "--no-update-notifier", "--fetch-retries=0"} {
+				if languageContainsSequence(argv, []string{removed}) {
+					t.Fatalf("argv still injects %s: %q", removed, argv)
+				}
 			}
-		}
-		if n != want {
-			t.Errorf("unexpected inserted global flag in %q", argv)
-		}
-	}
-	argv := languageCommand(languageToolchain{backend: "npm"}, "install", []string{"root"}, nil, false, "http://127.0.0.1", nil)
-	if languageContainsSequence(argv, []string{"--global"}) {
-		t.Fatal("changed legacy npm local default")
+		})
 	}
 }
 
@@ -263,8 +267,18 @@ func TestUnifiedLanguageInstallOwnsNoState(t *testing.T) {
 				t.Fatalf("changed root/options argv: %q", argv)
 			}
 			if backend == "npm" {
-				if !languageContainsSequence(argv, []string{"--global"}) || !languageContainsSequence(argv, []string{"--ignore-scripts"}) {
-					t.Fatalf("missing npm defaults: %q", argv)
+				if languageContainsSequence(argv, []string{"--global"}) {
+					t.Fatalf("npm install must not force a scope: %q", argv)
+				}
+				for _, flag := range []string{"--ignore-scripts", "--omit-lockfile-registry-resolved", "--replace-registry-host=never"} {
+					if !languageContainsSequence(argv, []string{flag}) {
+						t.Fatalf("missing npm policy flag %s: %q", flag, argv)
+					}
+				}
+				for _, removed := range []string{"--no-audit", "--no-fund", "--no-update-notifier", "--fetch-retries=0"} {
+					if languageContainsSequence(argv, []string{removed}) {
+						t.Fatalf("npm install still injects %s: %q", removed, argv)
+					}
 				}
 			} else if !languageContainsSequence(argv, []string{"--only-binary=:all:"}) || languageContainsSequence(argv, []string{"--global"}) {
 				t.Fatalf("incorrect pip defaults: %q", argv)
@@ -296,8 +310,11 @@ func TestUnifiedLanguageRemoveOffline(t *testing.T) {
 					t.Fatalf("registry on removal: %q", argv)
 				}
 			}
-			if backend == "npm" && !languageContainsSequence(argv, []string{"--offline"}) {
-				t.Fatal("npm removal could access remote registry")
+			if backend == "npm" && (!languageContainsSequence(argv, []string{"--offline"}) || !languageContainsSequence(argv, []string{"--ignore-scripts"})) {
+				t.Fatalf("npm removal could access remote registry or run scripts: %q", argv)
+			}
+			if languageContainsSequence(argv, []string{"--global"}) {
+				t.Fatalf("removal must not force a scope: %q", argv)
 			}
 			if backend == "pip" && (!languageContainsSequence(argv, []string{"--yes"}) || !strings.Contains(out.String(), "dependencies are retained")) {
 				t.Fatal("pip did not preserve dependencies/confirm once")
@@ -455,100 +472,27 @@ func TestUnifiedCancelledProbeNotMissingToolchain(t *testing.T) {
 	}
 }
 
-func TestLegacyLanguageRemovalDoesNotLoadIndex(t *testing.T) {
-	for _, backend := range []string{"npm", "pip"} {
-		t.Run(backend, func(t *testing.T) {
-			m, _, log := languageTestManager(t, backend)
-			if err := m.Language(context.Background(), backend, []string{"uninstall", "root"}); err != nil {
-				t.Fatal(err)
-			}
-			argv := languageReadArgv(t, log)
-			if languageContainsSequence(argv, []string{"--global"}) || languageContainsSequence(argv, []string{"--yes"}) {
-				t.Fatalf("changed legacy scope/confirmation: %q", argv)
-			}
-		})
-	}
-}
-
-func TestUnifiedNpmProjectPreflightBeforeToolchain(t *testing.T) {
-	m, out, _ := languageTestManager(t, "npm")
-	t.Setenv("PATH", t.TempDir()) // The project policy must win over missing npm.
-	parent := t.TempDir()
-	nested := filepath.Join(parent, "nested", "child")
-	if err := os.MkdirAll(nested, 0755); err != nil {
-		t.Fatal(err)
-	}
-	npmrc := filepath.Join(parent, ".npmrc")
-	// Registry and proxy settings are honoured and forwarded now, so a scoped
-	// registry in an ancestor .npmrc must be accepted and must not leak.
-	if err := os.WriteFile(npmrc, []byte("@scope:registry=https://private.invalid/secret\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, prefix := range []string{nested, filepath.Join(nested, "not-created")} {
-		err := m.CheckLanguageInstall(context.Background(), "npm", []string{"--global=false", "--prefix", prefix})
-		var missing *MissingToolchainError
-		// With policy satisfied, preflight proceeds to the (deliberately
-		// missing) toolchain instead of rejecting the project config.
-		if !errors.As(err, &missing) {
-			t.Fatalf("scoped registry was not forwarded: %v", err)
-		}
-		if strings.Contains(err.Error(), "private.invalid") || out.Len() != 0 {
-			t.Fatal("logged project configuration value")
-		}
-	}
-	// Options that execute code inside npm stay rejected in the logical parent
-	// chain, including a prefix that does not exist yet.
-	if err := os.WriteFile(npmrc, []byte("node-options=--require=/tmp/evil.js\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, prefix := range []string{nested, filepath.Join(nested, "not-created")} {
-		err := m.CheckLanguageInstall(context.Background(), "npm", []string{"--global=false", "--prefix", prefix})
-		var missing *MissingToolchainError
-		if err == nil || errors.As(err, &missing) || !strings.Contains(err.Error(), "can execute code inside npm") {
-			t.Fatalf("project preflight: %v", err)
-		}
-	}
-	// The physical parent chain is checked too: a symlinked prefix resolves to
-	// the real project tree where the dangerous setting lives.
-	link := filepath.Join(t.TempDir(), "linked-prefix")
-	if err := os.Symlink(nested, link); err != nil {
-		t.Fatal(err)
-	}
-	err := m.CheckLanguageInstall(context.Background(), "npm", []string{"--global=false", "--prefix", link})
-	var missing *MissingToolchainError
-	if err == nil || errors.As(err, &missing) || !strings.Contains(err.Error(), "can execute code inside npm") {
-		t.Fatalf("missed physical parent config: %v", err)
-	}
-	// script-shell is rejected the same way.
-	if err := os.WriteFile(npmrc, []byte("script-shell=/tmp/evil-shell\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	err = m.CheckLanguageInstall(context.Background(), "npm", []string{"--global=false", "--prefix", nested})
-	if err == nil || !strings.Contains(err.Error(), "can execute code inside npm") {
-		t.Fatalf("script-shell accepted: %v", err)
-	}
-}
-
 func TestUnifiedCompatibleProtectionFlags(t *testing.T) {
-	for _, args := range [][]string{{"--global", "false"}, {"--no-audit"}, {"--ignore-scripts"}, {"--ignore-scripts", "true"}, {"--ignore-scripts=true"}, {"--audit=false"}, {"--no-fund"}} {
-		if err := validateLanguageOptions("npm", args, false); err != nil {
+	for _, args := range [][]string{{"--global", "false"}, {"--global"}, {"-g"}, {"--no-global"}, {"--no-audit"}, {"--ignore-scripts"}, {"--ignore-scripts", "true"}, {"--ignore-scripts=true"}, {"--audit=false"}, {"--no-fund"}, {"--fetch-retries=0"}} {
+		if err := validateLanguageOptions("npm", args); err != nil {
 			t.Errorf("rejected compatible safety option %q: %v", args, err)
 		}
 	}
-	if err := validateLanguageOptions("pip", []string{"--only-binary=:all:"}, false); err != nil {
+	if err := validateLanguageOptions("pip", []string{"--only-binary=:all:"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateLanguageOptions("npm", []string{"--ignore-scripts", "false"}, true); err == nil {
+	if err := validateLanguageOptions("npm", []string{"--ignore-scripts", "false"}); err == nil {
 		t.Fatal("accepted disabling scripts via separate false")
 	}
-	global, explicit, _, err := npmScope([]string{"--global", "false"}, true)
-	if err != nil || global || !explicit {
-		t.Fatal("separate global=false override misidentified")
-	}
 	for _, args := range [][]string{{"--loc=project"}, {"--pref=/tmp"}, {"-gw=other"}, {"-C/other"}} {
-		if err := validateLanguageOptions("npm", args, false); err == nil {
+		if err := validateLanguageOptions("npm", args); err == nil {
 			t.Errorf("accepted unchecked scope shorthand %q", args)
 		}
+	}
+	// Scope flags pass through untouched: oo neither inserts nor rewrites them.
+	argv := languageCommand(languageToolchain{backend: "npm"}, "install", []string{"root@1.0.0"}, []string{"--global"}, "", nil)
+	if !languageContainsSequence(argv, []string{"--global"}) {
+		t.Fatalf("dropped a user-supplied scope flag: %q", argv)
 	}
 }
 
@@ -634,9 +578,14 @@ func TestUnifiedNpmForwardsOwnRegistryWithoutConfigInjection(t *testing.T) {
 	if !languageContainsSequence(argv, []string{"--@scope:registry=" + registryArg}) {
 		t.Fatalf("missing catalog scope override: %q", argv)
 	}
-	for _, flag := range []string{"--ignore-scripts", "--no-audit", "--no-fund", "--no-update-notifier", "--omit-lockfile-registry-resolved", "--fetch-retries=0", "--replace-registry-host=never"} {
+	for _, flag := range []string{"--ignore-scripts", "--omit-lockfile-registry-resolved", "--replace-registry-host=never"} {
 		if !languageContainsSequence(argv, []string{flag}) {
 			t.Fatalf("missing npm policy flag %s: %q", flag, argv)
+		}
+	}
+	for _, removed := range []string{"--global", "--no-audit", "--no-fund", "--no-update-notifier", "--fetch-retries=0"} {
+		if languageContainsSequence(argv, []string{removed}) {
+			t.Fatalf("unexpected injected flag %s: %q", removed, argv)
 		}
 	}
 }

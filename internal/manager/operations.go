@@ -208,7 +208,7 @@ func (m *Manager) InstallMany(ctx context.Context, specs []string, options Insta
 		fmt.Fprintln(m.Out, "Installation plan:")
 		m.printNativePlan(plan)
 		for _, backend := range backendNames(groups) {
-			fmt.Fprintf(m.Out, "  %s: %s (global by default; arguments after -- may override the scope)\n", backend, strings.Join(groups[backend], ", "))
+			fmt.Fprintf(m.Out, "  %s: %s (the backend's own default scope; change it with arguments after --)\n", backend, strings.Join(groups[backend], ", "))
 			fmt.Fprintf(m.Out, "    %s resolves its own dependencies; oo does not track this installation.\n", backend)
 		}
 		if len(missing) > 0 {
@@ -331,7 +331,7 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 			fmt.Fprintf(m.Out, "  keep %s@%s: %s\n", key.Name, key.Version, kept[key])
 		}
 		for _, backend := range backendNames(groups) {
-			fmt.Fprintf(m.Out, "  %s removes %s (global by default); external reverse dependencies are not guaranteed protected by oo.\n", backend, strings.Join(groups[backend], ", "))
+			fmt.Fprintf(m.Out, "  %s removes %s; external reverse dependencies are not guaranteed protected by oo.\n", backend, strings.Join(groups[backend], ", "))
 			if backend == "pip" {
 				fmt.Fprintln(m.Out, "    pip dependencies are retained; no automatic dependency cleanup.")
 			}

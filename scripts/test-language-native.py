@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -41,15 +42,19 @@ with tempfile.TemporaryDirectory(prefix='oo-language-', dir=args.tmp_parent) as 
     oo = args.oo.resolve()
     run(oo, 'update')
     (project / 'package.json').write_text('{"name":"oo-upstream-test","version":"1.0.0","private":true}')
-    run(oo, 'npm', 'install', 'is-number@7.0.0')
+    run(oo, 'install', 'npm:is-number@7.0.0', '-y')
     run('node', '-e', "if (!require('is-number')(42) || require('is-number')('x')) process.exit(1)")
     lock = (project / 'package-lock.json').read_text()
     assert '127.0.0.1' not in lock and '"resolved"' not in lock
-    run(oo, 'npm', 'ci')
-    run(oo, 'npm', 'uninstall', 'is-number')
+    # `oo npm ci` is gone with the legacy entry points; re-install the same
+    # package after clearing node_modules as the closest verifiable equivalent.
+    shutil.rmtree(project / 'node_modules')
+    run(oo, 'install', 'npm:is-number@7.0.0', '-y')
+    run('node', '-e', "if (!require('is-number')(42) || require('is-number')('x')) process.exit(1)")
+    run(oo, 'remove', 'npm:is-number', '-y')
     run('python3', '-m', 'venv', root / 'venv')
     env['OHECO_PYTHON'] = str(root / 'venv/bin/python3')
-    run(oo, 'pip', 'install', 'idna==3.10')
+    run(oo, 'install', 'pip:idna@3.10', '-y')
     run(env['OHECO_PYTHON'], '-c', "import idna; assert idna.encode('例子.测试') == b'xn--fsqu00a.xn--0zwm56d'")
-    run(oo, 'pip', 'uninstall', '-y', 'idna')
+    run(oo, 'remove', 'pip:idna', '-y')
     print('PASS official npm/PyPI through native oo proxy, terminal, spaces, lock reuse, imports and removal')

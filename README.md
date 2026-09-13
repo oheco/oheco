@@ -93,7 +93,7 @@ oo install oheco
 - `install name` 安装原生包该平台的 `latest`；`install name@version` 安装指定版本。
   原生包默认启用本次安装的版本；`--no-switch` 只安装，保留当前启用状态。
   v0.7.0 的统一 `install` / `remove` 入口支持多个目标，并按目录包的管理器分派；
-  外部包默认全局范围，作用域和参数规则见下方“Python 与 Node.js 包”。
+  外部包不注入作用域，参数规则见下方“Python 与 Node.js 包”。
   原生包下载时显示进度、已下载/总大小和平均下载速度；终端中每 200 毫秒刷新同一行，
   重定向输出时每 5 秒记录一行。下载结束显示最终状态，命中有效缓存时跳过下载。
 - `switch name version` 只切换已安装的原生版本，一起处理包内全部命令。
@@ -220,16 +220,16 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.8.1`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
+`OHECO_VERSION` 默认 `0.9.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
 `ohos-sdk-toolchains` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 打包不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.8.1
+python3 scripts/package.py --version 0.9.0
 ```
 
-`--version` 省略时同样默认 `0.8.1`。输出 `dist/oheco-0.8.1-ohos-arm64.tar.gz` 和 `.sha256`。
+`--version` 省略时同样默认 `0.9.0`。输出 `dist/oheco-0.9.0-ohos-arm64.tar.gz` 和 `.sha256`。
 同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
@@ -327,30 +327,28 @@ SDK 的 native 原始 ZIP 含 8 对仅大小写不同且内容不同的 Linux ne
 ```zsh
 oo update
 oo install <目录包名>
-oo install npm:<npm包名>             # 统一入口默认全局
-oo install pip:<Python包名>          # 使用选定的基础 Python 环境
-oo install npm:<npm包名> -- --global=false --prefix ./project  # 显式本地范围
-oo install npm:<npm包名> -- --prefix "$HOME/.local"            # 独立目录，仍为全局
-oo remove npm:<npm包名>
+oo install npm:<npm包名>                    # 作用域由你决定，见下
+oo install npm:<npm包名> -- --global        # 全局安装（npm 的默认是当前项目）
+oo install pip:<Python包名>                 # 使用选定的基础 Python 环境
+oo install pip:<Python包名> -- --target ./vendor
+oo remove npm:<npm包名> -- --global
 oo remove pip:<Python包名>
-# 保留旧入口兼容：
-oo npm install <npm包名>             # 旧 oo npm 仍默认当前项目
-oo npm install <npm包名> --global
-oo pip install <Python包名>
 ```
 
-统一 `oo install` / `oo remove` 按目录记录选择管理器；`npm:<name>` / `pip:<name>`
-可显式选择生态包。统一入口**默认全局范围**：npm 使用全局目录，pip 使用选定的基础 Python
-环境。作用域参数必须放在 `--` 分隔符之后，不能直接当作 oo 顶层选项。
-`--prefix DIR` **只选择目录，不隐含 local**；统一安装/卸载即便带 prefix 仍默认 global。
-只有显式 `--global=false`、`--no-global`、`--local` 或 `--location=project` 才选择本地范围；
-`-g` / `--global` 显式选择全局。旧 `oo npm` 保留 npm-local 兼容默认值，不随统一入口
-改为全局。安装和卸载时应选择相同的作用域和目录。
+统一 `oo install` / `oo remove` 按目录记录选择管理器；`npm:<name>` / `pip:<name>` 可显式选择
+生态包。**oo 不替你决定作用域**：它不注入 `--global`、`--local`、`--prefix` 或 `--location`，
+一律沿用后端默认（npm 默认装进当前项目的 `node_modules`，pip 默认装进所选解释器环境）。
+要全局安装或指定目录，就在 `--` 之后自己传，安装与卸载使用相同的作用域。同理，`-y` 只接受 oo
+自己的确认，不代替后端选项。
 
 `--` 后的参数仅允许用于**单一外部管理器**，不用于原生包或混合管理器操作，作为参数数组传递，
-不经 shell 求值。`--registry`、额外索引、`find-links`、启用安装脚本等**源与脚本**类参数仍被
+不经 shell 求值。oo 只往命令行里加三类参数：**改源**（`--registry`、`--@scope:registry`、
+`--index-url`）、**正确性**（`--replace-registry-host=never`、
+`--omit-lockfile-registry-resolved`、npm 卸载 `--offline`、pip 卸载 `--yes`）与**安全**
+（`--ignore-scripts`、`--only-binary=:all:`），其余（审计、重试、日志、作用域等）都由你传或
+沿用后端默认。`--registry`、额外索引、`find-links`、启用安装脚本等**源与脚本**类参数仍被
 拒绝：oo 必须自己决定源，否则同名上游包会顶替目录里的适配包。`--autoremove` / `--cascade`
-仅用于原生依赖管理；`-y` 只接受确认，不要求 pip/npm 清理依赖。
+仅用于原生依赖管理。
 
 语言包安装由所选 Python 的 pip 或 PATH 中的 npm 执行。Python 默认使用 PATH 中的
 `python3`，可通过 `OHECO_PYTHON` 选择解释器；npm 的 `--prefix` 可选择独立目录。安装库时，
@@ -389,11 +387,11 @@ npm 仍使用 `--omit-lockfile-registry-resolved`，锁文件保留版本和完�
 生成锁文件。用户的 pip/npm 源配置不会被修改。中断时 oo 终止自己的包管理器进程组并关闭服务；
 安装目录遵循 pip/npm 的中断恢复行为，需要时重跑安装。
 
-语言环境及其依赖由 pip/npm 实时解析和管理，不镜像为 oo 的原生安装记录。使用 `oo pip list`、
-`oo npm list` 查询相应环境，使用统一 `oo remove` 或旧 `oo pip uninstall <包名>`、
-`oo npm uninstall <包名>` 卸载，并注意全局/本地作用域。pip 会保留被卸载包的依赖；
-外部后端不保证跨根目录的反向依赖保护。`oo list` 不盘点这些外部安装，`oo switch`、
-`--no-switch` 和 `命令@版本` 链接只适用于原生包；语言包通过安装所需版本切换。
+语言环境及其依赖由 pip/npm 实时解析和管理，不镜像为 oo 的原生安装记录。安装之后请直接用
+原生 `npm` / `pip` 查询和管理（oo 不再提供 `oo npm` / `oo pip` 子命令）；需要经过 oo 的临时
+源才能完成的动作，用统一 `oo install` / `oo remove`，并在 `--` 之后带上对应的作用域参数。
+pip 会保留被卸载包的依赖；外部后端不保证跨根目录的反向依赖保护。`oo list` 不盘点这些外部
+安装，`oo switch`、`--no-switch` 和 `命令@版本` 链接只适用于原生包；语言包通过安装所需版本切换。
 
 维护者可从最终 wheel/tarball 生成对应字段，避免手写依赖信息：
 
