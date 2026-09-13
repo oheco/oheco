@@ -9,7 +9,7 @@ import tarfile
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
-parser.add_argument("--version", default="0.7.0")
+parser.add_argument("--version", default="0.7.1")
 parser.add_argument("--binary", type=Path, default=root / "build/oo")
 parser.add_argument("--output", type=Path, default=root / "dist")
 args = parser.parse_args()

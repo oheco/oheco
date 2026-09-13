@@ -2,16 +2,18 @@
 
 鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
-> **v0.7.0** 提供 schema v5 的逐版本原生依赖、批量安装/卸载和统一 npm/pip 入口。
+> **v0.7.1** 将官网和默认索引统一为 `https://oheco.org`，保留 v0.7.0 的
+> schema v5 原生依赖、批量安装/卸载及统一 npm/pip 入口。
 > npm/pip 继续管理各自的依赖与安装状态；oheco 查询中的管理器标记不表示已经安装。
 > 原生测试及隔离 CLI 验收见 `scripts/test-dependencies-native.py`。安装脚本取得正式源已发布版本。
+> 域名迁移与兼容验证见 [0.7.1 验证说明](docs/validation-0.7.1.md)。
 
 ## 安装
 
 在鸿蒙原生 zsh 终端执行：
 
 ```zsh
-curl -fsSL https://oheco.github.io/oheco-packages/install.sh | zsh
+curl -fsSL https://oheco.org/install.sh | zsh
 ```
 
 安装器依赖 `curl`、`tar`、`sha256sum`（或 `shasum`）及基础文件命令，不依赖 Go、Git
@@ -258,11 +260,18 @@ oo install oheco
 oo update
 ```
 
-v0.7.0 源码默认索引地址为 `https://oheco.github.io/oheco-packages/index/v5/index.json`，
-仍兼容 v1–v4 索引。生成的 `index/v1/index.json` 至 `index/v4/index.json` 兼容索引采用
-fail-closed 策略：**移除整个 schema v5 包**，不能只删掉依赖字段而让旧客户端不安全地安装。
-内置自举目录及 `oheco` 自举包继续使用 schema v1，使旧客户端能够取得新客户端；
-此处说明的是开发版协议，并不声明 v0.7.0 或线上 v5 索引已发布。
+v0.7.1 默认索引为 `https://oheco.org/index/v5/index.json`，直接访问新域名，
+不再依赖旧 GitHub Pages 地址跳转。显式设置的 `OHECO_INDEX_URL` 仍优先，升级不会擅自
+覆盖用户自定义源；若曾在 shell 配置中设置旧官网地址，请按需改成新 HTTPS 地址。
+索引源改变时，客户端自动重新验证索引缓存，不需要删除安装记录或重新安装已有软件。
+
+域名迁移不改变索引 schema v5 和安装状态 schema 2。仍保留 v1–v4 索引；生成的
+`index/v1/index.json` 至 `index/v4/index.json` 采用 fail-closed 策略：**移除整个 schema v5 包**，
+不能只删掉依赖字段而让旧客户端不安全地安装。`oheco` 自举包继续使用 schema v1，
+旧客户端可通过旧地址的 HTTPS 重定向取得新版；无法使用旧跳转时，0.6.x 可临时指定
+`https://oheco.org/index/v4/index.json`，0.7.x 可指定新域名的 v5 索引，再升级客户端。
+不能将只支持旧 schema 的客户端直接指向 v5。已发布归档、GitHub Release 下载地址及
+历史验证记录保持不变；官网迁移不意味着软件产物也移出 GitHub。
 安装了 ZIP 或启动器包后应继续使用 0.2.0 或更新的客户端管理它们。
 
 v0.7.0 的原生状态迁移写入 **schema 2**，与目录索引的 schema v5 不同；迁移前的记录保存在

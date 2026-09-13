@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--oo', type=Path, default=Path(__file__).resolve().parent.parent / 'build/oo')
 parser.add_argument('--proxy', required=True, help='HTTP(S) or SOCKS proxy used only by oo')
 parser.add_argument('--tmp-parent', type=Path, required=True, help='Writable application-private directory')
-parser.add_argument('--index-url', default='https://oheco.github.io/oheco-packages/index/v3/index.json')
+parser.add_argument('--index-url', default='https://oheco.org/index/v3/index.json')
 args = parser.parse_args()
 if sys.platform != 'ohos':
     parser.error('run on the HarmonyOS host')

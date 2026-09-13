@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.7.0"
+var version = "0.7.1"
 
 const help = `oo — the oheco package manager
 
@@ -53,7 +53,7 @@ Legacy oo npm / oo pip remain available (oo npm keeps its original local default
 
 Environment:
   OHECO_ROOT        Installation root (default: ~/.oheco)
-  OHECO_INDEX_URL   Index URL (default: official GitHub Pages index)
+  OHECO_INDEX_URL   Index URL (default: https://oheco.org/index/v5/index.json)
   OHECO_NO_AUTO_UPDATE=1  Disable background index updates
   OHECO_PYTHON      Python executable for oo pip (default: python3 from PATH)
 `
