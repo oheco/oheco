@@ -13,6 +13,7 @@ func operationArgs(command string, args []string) ([]string, manager.InstallOpti
 	seen := map[string]bool{}
 	for i, arg := range args {
 		if arg == "--" {
+			install.HasBackendArgs, remove.HasBackendArgs = true, true
 			tail = append([]string{}, args[i+1:]...)
 			break
 		}

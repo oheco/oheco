@@ -465,6 +465,9 @@ func (m *Manager) commit(before, after State, stage, destination string) error {
 
 // All staged native packages share one journal and one state transition.
 func (m *Manager) commitStages(before, after State, stages map[string]string) error {
+	if err := m.SDKRemovalGuard(before, after); err != nil {
+		return err
+	}
 	if err := after.validate(); err != nil {
 		return err
 	}

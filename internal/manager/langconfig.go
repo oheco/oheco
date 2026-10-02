@@ -41,9 +41,12 @@ func (m *Manager) probe(ctx context.Context, program string, env []string, args 
 
 // npmUpstream resolves the registry npm would use without oo's own --registry
 // override, plus any per-scope overrides and credential hints.
-func (m *Manager) npmUpstream(ctx context.Context, tool languageToolchain) (npmUpstream, error) {
+func (m *Manager) npmUpstream(ctx context.Context, tool languageToolchain, options LanguageOptions) (npmUpstream, error) {
 	var result npmUpstream
-	out, err := m.probe(ctx, tool.program, tool.env, "config", "get", "registry")
+	// npm itself decides which npmrc files apply. In global mode a project
+	// npmrc must not become the upstream for the temporary registry.
+	scope := npmScopeArgs(options)
+	out, err := m.probe(ctx, tool.program, tool.env, append([]string{"config", "get", "registry"}, scope...)...)
 	if err != nil {
 		return result, fmt.Errorf("read npm registry configuration: %w", err)
 	}
@@ -60,7 +63,7 @@ func (m *Manager) npmUpstream(ctx context.Context, tool languageToolchain) (npmU
 	// credential *values* from `config ls` (and refuses `config get` on them), so
 	// credential hints are collected from key names in the config files and the
 	// environment below.
-	out, err = m.probe(ctx, tool.program, tool.env, "config", "ls", "--json")
+	out, err = m.probe(ctx, tool.program, tool.env, append([]string{"config", "ls", "--json"}, scope...)...)
 	if err != nil {
 		return result, fmt.Errorf("read npm configuration: %w", err)
 	}
@@ -85,15 +88,70 @@ func (m *Manager) npmUpstream(ctx context.Context, tool languageToolchain) (npmU
 	if len(result.Scoped) == 0 {
 		result.Scoped = nil
 	}
-	result.Auth = npmCredentialHosts(tool.env)
+	global := !options.HasBackendArgs || config["global"] == true || config["location"] == "global"
+	result.Auth = npmCredentialHosts(tool.env, config, global)
 	return result, nil
 }
 
+// npmScopeArgs forwards only destination/mode flags to read-only config probes.
+// Logging and arbitrary backend flags must not alter the probe's output format.
+func npmScopeArgs(options LanguageOptions) []string {
+	if !options.HasBackendArgs {
+		return []string{"--global"}
+	}
+	var result []string
+	for i := 0; i < len(options.Args); i++ {
+		arg := options.Args[i]
+		key, value, assigned := strings.Cut(arg, "=")
+		// nopt also accepts exact long option names with one dash. Do not
+		// mistake -loglevel/-ignore-scripts for clusters containing global -g.
+		switch key {
+		case "-global", "-no-global", "-local", "-no-local", "-location", "-prefix":
+			key = "-" + key
+			arg = key
+			if assigned {
+				arg += "=" + value
+			}
+		}
+		switch key {
+		case "--global", "--no-global", "--local", "--no-local", "-g":
+			result = append(result, arg)
+			if !assigned && i+1 < len(options.Args) && (options.Args[i+1] == "true" || options.Args[i+1] == "false") {
+				i++
+				result = append(result, options.Args[i])
+			}
+		case "--location", "--prefix", "-C", "-L":
+			result = append(result, arg)
+			if !assigned && i+1 < len(options.Args) {
+				i++
+				result = append(result, options.Args[i])
+			}
+		default:
+			// npm only expands clusters consisting entirely of its one-letter
+			// shorthands. Forwarding -v would stop the probe; normalize just -g.
+			// C/L (value-taking scope shorthands) cannot be clustered: validation
+			// requires separate -C/-L or the complete long scope option instead.
+			if strings.HasPrefix(key, "-") && !strings.HasPrefix(key, "--") && strings.Contains(key, "g") && strings.Trim(strings.TrimPrefix(key, "-"), "adqsncfglmpSBDEOP?Hhvy") == "" {
+				if assigned && strings.HasSuffix(key, "g") {
+					result = append(result, "--global="+value)
+				} else {
+					result = append(result, "--global")
+				}
+			}
+			if npmLanguageValues[key] && !assigned {
+				i++
+			}
+		}
+	}
+	return result
+}
+
 // npmCredentialHosts reports which hosts appear to need credentials, by reading
-// only the KEY NAMES of the user/project npmrc files and the environment. npm
+// only the KEY NAMES of effective user/global (and, in local mode, project)
+// npmrc files and the environment. npm
 // hides credential values from `config ls`, and oo never needs them: file
 // contents and values are neither copied nor printed.
-func npmCredentialHosts(env []string) []string {
+func npmCredentialHosts(env []string, config map[string]any, global bool) []string {
 	found := map[string]bool{}
 	record := func(key string) {
 		if !isNpmCredentialKey(key) {
@@ -120,10 +178,15 @@ func npmCredentialHosts(env []string) []string {
 			record(strings.TrimSpace(key))
 		}
 	}
-	if home != "" {
+	if userconfig, ok := config["userconfig"].(string); ok && userconfig != "" {
+		files = []string{userconfig}
+	} else if len(files) == 0 && home != "" {
 		files = append(files, filepath.Join(home, ".npmrc"))
 	}
-	if dir, err := os.Getwd(); err == nil {
+	if globalconfig, ok := config["globalconfig"].(string); ok && globalconfig != "" {
+		files = append(files, globalconfig)
+	}
+	if dir, err := os.Getwd(); err == nil && !global {
 		for depth := 0; depth < 32; depth++ {
 			files = append(files, filepath.Join(dir, ".npmrc"))
 			parent := filepath.Dir(dir)
@@ -177,6 +240,90 @@ func credentialHost(key string) string {
 		return key[:at]
 	}
 	return ""
+}
+
+func pipScopeConflict(key string) error {
+	return fmt.Errorf("default pip global scope conflicts with %s; unset the destination override or use -- to explicitly accept backend scope/configuration", key)
+}
+
+func falsePipUser(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "0", "false", "no", "off":
+		return true
+	}
+	return false
+}
+
+func checkDefaultPipEnvironment(env []string) error {
+	for _, entry := range env {
+		key, value, _ := strings.Cut(entry, "=")
+		if value == "" {
+			continue
+		}
+		switch key {
+		case "PIP_USER":
+			if falsePipUser(value) {
+				continue
+			}
+		case "PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_PYTHON", "PYTHONPATH", "PYTHONHOME":
+		default:
+			continue
+		}
+		return pipScopeConflict(key)
+	}
+	return nil
+}
+
+// checkDefaultPipScope fails closed rather than silently redirecting a default
+// global operation. It never edits pip.conf or the caller's environment. Explicit
+// -- opts out of this check, including a bare -- or ordinary logging flags.
+func (m *Manager) checkDefaultPipScope(ctx context.Context, tool languageToolchain, command string) error {
+	if err := checkDefaultPipEnvironment(tool.env); err != nil {
+		return err
+	}
+	// Use pip's own loader but not its CLI parser: even `pip config list`
+	// honors global.python and can re-exec into a different environment before
+	// reporting values. Read the selected interpreter's config without re-exec.
+	// If this internal API is unavailable, fail closed; explicit -- opts out.
+	out, err := m.probe(ctx, tool.program, tool.env, "-B", "-c", `import json; from pip._internal.configuration import Configuration; _oheco_pip_config=Configuration(isolated=False); _oheco_pip_config.load(); _oheco_pip_values={}; [_oheco_pip_values.update(v if isinstance(v,dict) else {k:v}) for k,v in _oheco_pip_config.items()]; print(json.dumps(_oheco_pip_values))`)
+	if err != nil {
+		return fmt.Errorf("read pip destination configuration without interpreter redirection (use -- to explicitly accept backend scope): %w", err)
+	}
+	var values map[string]string
+	if err := json.Unmarshal(out, &values); err != nil {
+		return fmt.Errorf("parse pip destination configuration: %w", err)
+	}
+	// The general parser consumes global.python before the command parser can
+	// override it, so an empty install.python/uninstall.python cannot make it safe.
+	if values["global.python"] != "" {
+		return pipScopeConflict("global.python")
+	}
+	// Match pip's option precedence: global < command section < environment.
+	for _, name := range []string{"user", "target", "prefix", "root", "python"} {
+		key, value := "global."+name, values["global."+name]
+		if v, ok := values[command+"."+name]; ok && v != "" {
+			key, value = command+"."+name, v
+		}
+		if v, ok := values[":env:."+name]; ok && v != "" {
+			key, value = "PIP_"+strings.ToUpper(name), v
+		}
+		// Inspect the environment too: config-list fixtures and older pip
+		// versions may omit environment options from their output.
+		for _, entry := range tool.env {
+			k, v, _ := strings.Cut(entry, "=")
+			if k == "PIP_"+strings.ToUpper(name) && v != "" {
+				key, value = k, v
+			}
+		}
+		if value == "" {
+			continue
+		}
+		if name == "user" && falsePipUser(value) {
+			continue
+		}
+		return pipScopeConflict(key)
+	}
+	return nil
 }
 
 // pipUpstream resolves every index pip would consult. extra-index-url values

@@ -59,7 +59,7 @@ func TestLanguageInstallUsesNpmAndPreservesUserConfig(t *testing.T) {
 	}
 	b, _ := json.Marshal(idx)
 	os.WriteFile(filepath.Join(m.Root, "index", "index.json"), b, 0644)
-	if err := m.InstallLanguage(context.Background(), idx, "npm", []string{"oo-language-fixture@1.0.0"}, LanguageOptions{Yes: true}); err != nil {
+	if err := m.InstallLanguage(context.Background(), idx, "npm", []string{"oo-language-fixture@1.0.0"}, LanguageOptions{HasBackendArgs: true, Yes: true}); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	cmd := exec.Command("node", "-e", "console.log(require('oo-language-fixture'))")
@@ -79,7 +79,7 @@ func TestLanguageInstallUsesNpmAndPreservesUserConfig(t *testing.T) {
 	if err != nil || !bytes.Equal(got, config) {
 		t.Fatal("user configuration changed")
 	}
-	if err := m.RemoveLanguage(context.Background(), "npm", []string{"oo-language-fixture"}, LanguageOptions{Yes: true}); err != nil {
+	if err := m.RemoveLanguage(context.Background(), "npm", []string{"oo-language-fixture"}, LanguageOptions{HasBackendArgs: true, Yes: true}); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "node_modules", "oo-language-fixture")); !os.IsNotExist(err) {
@@ -149,7 +149,7 @@ func TestLanguagePipResolvesWheelDependenciesInIsolatedTarget(t *testing.T) {
 		idx.Packages = append(idx.Packages, p)
 	}
 	target := filepath.Join(dir, "target with spaces")
-	if err := m.InstallLanguage(context.Background(), idx, "pip", []string{"oo-language-root==1.0.0"}, LanguageOptions{Args: []string{"--target", target, "--no-cache-dir"}, Yes: true}); err != nil {
+	if err := m.InstallLanguage(context.Background(), idx, "pip", []string{"oo-language-root==1.0.0"}, LanguageOptions{Args: []string{"--target", target, "--no-cache-dir"}, HasBackendArgs: true, Yes: true}); err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	cmd := exec.Command(python, "-B", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import oo_language_root, oo_language_dep; print(oo_language_root.value + oo_language_dep.value)", target)

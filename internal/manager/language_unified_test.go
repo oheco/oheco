@@ -42,7 +42,7 @@ func TestUnifiedLanguageOptionsPreserveArgv(t *testing.T) {
 			if err := validateLanguageOptions(backend, args); err != nil {
 				t.Errorf("%s rejected %q: %v", backend, args, err)
 			}
-			argv := languageCommand(languageToolchain{backend: backend}, "install", []string{"root"}, args, "http://127.0.0.1/nonce", nil)
+			argv := languageCommand(languageToolchain{backend: backend}, "install", []string{"root"}, LanguageOptions{Args: args, HasBackendArgs: true}, "http://127.0.0.1/nonce", nil)
 			if !reflect.DeepEqual(before, args) || !languageContainsSequence(argv, args) {
 				t.Errorf("modified argv: before=%q after=%q command=%q", before, args, argv)
 			}
@@ -51,8 +51,8 @@ func TestUnifiedLanguageOptionsPreserveArgv(t *testing.T) {
 }
 
 // TestUnifiedLanguageInjectedArgvExactly pins the complete set of arguments oo
-// adds. Nothing else may be injected: no scope override, no audit/fund/retry
-// policy, and no legacy-only flags.
+// adds in explicit -- mode. Nothing else may be injected: no default scope,
+// no audit/fund/retry policy, and no legacy-only flags.
 func TestUnifiedLanguageInjectedArgvExactly(t *testing.T) {
 	const url = "http://127.0.0.1:43210"
 	scopes := []string{"@scope"}
@@ -88,7 +88,7 @@ func TestUnifiedLanguageInjectedArgvExactly(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			argv := languageCommand(languageToolchain{backend: tc.backend}, tc.command, tc.targets, tc.args, tc.registryURL, tc.scopes)
+			argv := languageCommand(languageToolchain{backend: tc.backend}, tc.command, tc.targets, LanguageOptions{Args: tc.args, HasBackendArgs: true}, tc.registryURL, tc.scopes)
 			if !reflect.DeepEqual(argv, tc.want) {
 				t.Fatalf("argv = %q, want %q", argv, tc.want)
 			}
@@ -164,8 +164,20 @@ func languageTestPythonConfig(t *testing.T, path string, info languagePythonInfo
 	if !pip {
 		version = "printf 'No module named pip\\n' >&2; exit 7"
 	}
+	config := map[string]string{}
+	for _, line := range strings.Split(configList, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			config[strings.ToLower(strings.TrimSpace(key))] = strings.Trim(strings.TrimSpace(value), "'\"")
+		}
+	}
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
 	quote := func(s string) string { return strings.ReplaceAll(s, "'", "'\\''") }
-	body := "if [ \"$2\" = '-c' ]; then printf '%s\\n' '" + quote(string(data)) + "'; exit 0; fi\n" +
+	body := "case \"$3\" in *\"_oheco_pip_config\"*) printf '%s\\n' '" + quote(string(configJSON)) + "'; exit 0 ;; esac\n" +
+		"if [ \"$2\" = '-c' ]; then printf '%s\\n' '" + quote(string(data)) + "'; exit 0; fi\n" +
 		"case \"$*\" in\n" +
 		"*\"pip config list\"*) printf '%s\\n' '" + quote(configList) + "'; exit 0 ;;\n" +
 		"*--version*) " + version + " ;;\n" +
@@ -189,8 +201,8 @@ func languageTestNpm(t *testing.T, path, registry, configJSON string) {
 	quote := func(s string) string { return strings.ReplaceAll(s, "'", "'\\''") }
 	body := "case \"$*\" in\n" +
 		"*--version*) printf '10.0.0\\n'; exit 0 ;;\n" +
-		"\"config get registry\") printf '%s\\n' '" + quote(registry) + "'; exit 0 ;;\n" +
-		"\"config ls --json\") printf '%s\\n' '" + quote(configJSON) + "'; exit 0 ;;\n" +
+		"\"config get registry\"*) printf '%s\\n' '" + quote(registry) + "'; exit 0 ;;\n" +
+		"\"config ls --json\"*) printf '%s\\n' '" + quote(configJSON) + "'; exit 0 ;;\n" +
 		"esac\n" +
 		"for a in \"$@\"; do if [ \"$a\" = '--unknown-ordinary-option' ]; then printf 'fixture backend unknown option\\n'; exit 23; fi; done\n" +
 		"printf '%s\\n' \"$@\" > \"$OHECO_TEST_LANGUAGE_ARGS\"\n"
@@ -218,6 +230,9 @@ func languageTestManager(t *testing.T, backend string) (*Manager, *bytes.Buffer,
 	}
 	t.Setenv("PATH", bin)
 	t.Setenv("OHECO_PYTHON", "")
+	for _, key := range []string{"PIP_USER", "PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_PYTHON", "PYTHONPATH", "PYTHONHOME", "PYTHONNOUSERSITE"} {
+		t.Setenv(key, "")
+	}
 	t.Setenv("OHECO_TEST_LANGUAGE_ARGS", log)
 	return m, &out, log
 }
@@ -259,7 +274,7 @@ func TestUnifiedLanguageInstallOwnsNoState(t *testing.T) {
 			if backend == "pip" {
 				specs = []string{"root==1.0.0", "second==2.0.0"}
 			}
-			if err := m.InstallLanguage(context.Background(), languageTestIndex(), backend, specs, LanguageOptions{Args: args, Yes: true}); err != nil {
+			if err := m.InstallLanguage(context.Background(), languageTestIndex(), backend, specs, LanguageOptions{Args: args, HasBackendArgs: true, Yes: true}); err != nil {
 				t.Fatal(err)
 			}
 			argv := languageReadArgv(t, log)
@@ -313,8 +328,8 @@ func TestUnifiedLanguageRemoveOffline(t *testing.T) {
 			if backend == "npm" && (!languageContainsSequence(argv, []string{"--offline"}) || !languageContainsSequence(argv, []string{"--ignore-scripts"})) {
 				t.Fatalf("npm removal could access remote registry or run scripts: %q", argv)
 			}
-			if languageContainsSequence(argv, []string{"--global"}) {
-				t.Fatalf("removal must not force a scope: %q", argv)
+			if languageContainsSequence(argv, []string{"--global"}) != (backend == "npm") {
+				t.Fatalf("incorrect default removal scope: %q", argv)
 			}
 			if backend == "pip" && (!languageContainsSequence(argv, []string{"--yes"}) || !strings.Contains(out.String(), "dependencies are retained")) {
 				t.Fatal("pip did not preserve dependencies/confirm once")
@@ -336,7 +351,7 @@ func TestUnifiedLanguageDryRunAndPreflightNoChanges(t *testing.T) {
 	for _, backend := range []string{"npm", "pip"} {
 		t.Run(backend, func(t *testing.T) {
 			m, out, log := languageTestManager(t, backend)
-			if err := m.CheckLanguage(context.Background(), backend, nil); err != nil {
+			if err := m.CheckLanguage(context.Background(), backend, LanguageOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			if out.Len() != 0 {
@@ -386,7 +401,7 @@ func TestUnifiedLanguageConfirmationDefaultsNo(t *testing.T) {
 
 func TestUnifiedUnknownOptionReportedByBackend(t *testing.T) {
 	m, out, _ := languageTestManager(t, "npm")
-	err := m.InstallLanguage(context.Background(), languageTestIndex(), "npm", []string{"root@1.0.0"}, LanguageOptions{Args: []string{"--unknown-ordinary-option"}, Yes: true})
+	err := m.InstallLanguage(context.Background(), languageTestIndex(), "npm", []string{"root@1.0.0"}, LanguageOptions{Args: []string{"--unknown-ordinary-option"}, HasBackendArgs: true, Yes: true})
 	if err == nil || !strings.Contains(out.String(), "fixture backend unknown option") {
 		t.Fatalf("unknown option never reached backend: %v; %s", err, out)
 	}
@@ -397,7 +412,7 @@ func TestUnifiedMissingToolchains(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			m, _, _ := languageTestManager(t, backend)
 			t.Setenv("PATH", t.TempDir())
-			err := m.CheckLanguage(context.Background(), backend, nil)
+			err := m.CheckLanguage(context.Background(), backend, LanguageOptions{})
 			var missing *MissingToolchainError
 			want := "nodejs"
 			if backend == "pip" {
@@ -412,7 +427,7 @@ func TestUnifiedMissingToolchains(t *testing.T) {
 		m, _, _ := languageTestManager(t, "pip")
 		python := filepath.Join(os.Getenv("PATH"), "python3")
 		languageTestPython(t, python, languagePythonInfo{Executable: python, BaseExecutable: python, Prefix: "/base", BasePrefix: "/base"}, false)
-		err := m.CheckLanguage(context.Background(), "pip", nil)
+		err := m.CheckLanguage(context.Background(), "pip", LanguageOptions{})
 		var missing *MissingToolchainError
 		if !errors.As(err, &missing) || missing.Package != "python3" || !strings.Contains(missing.Reason, "-m pip") {
 			t.Fatalf("missing pip: %v", err)
@@ -423,7 +438,7 @@ func TestUnifiedMissingToolchains(t *testing.T) {
 		if err := os.Remove(filepath.Join(os.Getenv("PATH"), "npm")); err != nil {
 			t.Fatal(err)
 		}
-		err := m.CheckLanguage(context.Background(), "npm", nil)
+		err := m.CheckLanguage(context.Background(), "npm", LanguageOptions{})
 		var missing *MissingToolchainError
 		if !errors.As(err, &missing) || missing.Package != "nodejs" {
 			t.Fatalf("missing npm: %v", err)
@@ -465,7 +480,7 @@ func TestUnifiedCancelledProbeNotMissingToolchain(t *testing.T) {
 	m, _, _ := languageTestManager(t, "npm")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := m.CheckLanguage(ctx, "npm", nil)
+	err := m.CheckLanguage(ctx, "npm", LanguageOptions{})
 	var missing *MissingToolchainError
 	if !errors.Is(err, context.Canceled) || errors.As(err, &missing) {
 		t.Fatalf("cancelled probe was misclassified: %v", err)
@@ -489,8 +504,8 @@ func TestUnifiedCompatibleProtectionFlags(t *testing.T) {
 			t.Errorf("accepted unchecked scope shorthand %q", args)
 		}
 	}
-	// Scope flags pass through untouched: oo neither inserts nor rewrites them.
-	argv := languageCommand(languageToolchain{backend: "npm"}, "install", []string{"root@1.0.0"}, []string{"--global"}, "", nil)
+	// Explicit scope flags pass through untouched: oo adds no default scope.
+	argv := languageCommand(languageToolchain{backend: "npm"}, "install", []string{"root@1.0.0"}, LanguageOptions{Args: []string{"--global"}, HasBackendArgs: true}, "", nil)
 	if !languageContainsSequence(argv, []string{"--global"}) {
 		t.Fatalf("dropped a user-supplied scope flag: %q", argv)
 	}
@@ -583,7 +598,10 @@ func TestUnifiedNpmForwardsOwnRegistryWithoutConfigInjection(t *testing.T) {
 			t.Fatalf("missing npm policy flag %s: %q", flag, argv)
 		}
 	}
-	for _, removed := range []string{"--global", "--no-audit", "--no-fund", "--no-update-notifier", "--fetch-retries=0"} {
+	if !languageContainsSequence(argv, []string{"--global"}) {
+		t.Fatalf("missing default global scope: %q", argv)
+	}
+	for _, removed := range []string{"--no-audit", "--no-fund", "--no-update-notifier", "--fetch-retries=0"} {
 		if languageContainsSequence(argv, []string{removed}) {
 			t.Fatalf("unexpected injected flag %s: %q", removed, argv)
 		}

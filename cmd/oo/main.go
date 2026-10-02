@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.9.0"
+var version = "0.10.0"
 
 const help = `oo — the oheco package manager
 
@@ -25,6 +25,10 @@ Usage:
   oo switch <package> <version>       Activate an installed version (offline)
   oo remove <package[@version]>... [--all] [--autoremove] [--cascade] [-y] [--dry-run] [-- backend-args]
   oo list                            List installed versions (* = active)
+  oo sdk create <package-version>     Link installed SDK components (offline)
+  oo sdk list                        List fixed-version SDK views (offline)
+  oo sdk path <view-id>               Print the SDK root for Hvigor (offline)
+  oo sdk remove <view-id>             Remove a view, retaining its packages
   oo recover                         Recover an interrupted operation
   oo --version
 
@@ -38,11 +42,14 @@ Commands also refresh the index in the background without waiting.
 Native dependency plans are checked before installation; --yes accepts a reviewed
 plan without prompting. --autoremove includes unused automatic native dependencies;
 --cascade also removes native reverse dependents. Neither is implied by --yes.
-Language packages use the backend's own default scope: npm installs into the
-current project unless --global follows --, and pip uses the selected
-interpreter environment. Arguments after -- are passed as argv to the one
-selected external manager. Options that would bypass oo's own metadata source
-are rejected; oo adds only source, correctness and script/wheel-safety settings.
+Without --, npm install/remove use --global; pip uses global site-packages of
+its base interpreter (or explicit OHECO_PYTHON), never a silent user fallback.
+Any --, even bare or followed only by logging flags, disables default scope
+injection; the backend then chooses scope from its arguments/configuration.
+Arguments after -- are passed as argv to one selected external manager.
+Source, correctness and script/wheel-safety settings still apply in both modes.
+Default pip scope rejects destination overrides in environment/configuration;
+unset them or use -- to explicitly accept the backend's scope.
 Use npm:<name> / pip:<name> to explicitly select an ecosystem package.
 <由 npm/pip 管理> denotes ownership, not an assertion that the package is installed.
 Only native packages have oo receipts, versioned links and dependency cleanup.
@@ -85,6 +92,8 @@ func run(ctx context.Context, args []string) error {
 	}
 	command, args := args[0], args[1:]
 	switch command {
+	case "sdk":
+		return runSDK(ctx, m, args)
 	case "export":
 		spec, project, destination, err := exportArgs(args)
 		if err != nil {

@@ -76,7 +76,7 @@ oo install oheco
 ```
 
 - `update` 只更新索引，失败保留旧索引；`search`、`info` 查询本地索引。
-- 每次执行命令都会尝试启动独立的后台索引更新进程，包括 `help`、`--version`。
+- 普通命令会尝试启动独立的后台索引更新进程，包括 `help`、`--version`；`sdk` 命令完全离线，不启动后台更新。
   同一 `OHECO_ROOT` 最多一个更新进程，前台不等待，也不显示后台输出；发现更新时自动
   下载、校验并原子替换本地索引，后续命令使用更新后的索引，不升级已安装的软件。
   后台检查间隔至少 30 分钟；网络失败也会等待这个间隔再重试，单次后台任务最多运行 30 秒。
@@ -93,7 +93,7 @@ oo install oheco
 - `install name` 安装原生包该平台的 `latest`；`install name@version` 安装指定版本。
   原生包默认启用本次安装的版本；`--no-switch` 只安装，保留当前启用状态。
   v0.7.0 的统一 `install` / `remove` 入口支持多个目标，并按目录包的管理器分派；
-  外部包不注入作用域，参数规则见下方“Python 与 Node.js 包”。
+  外部包默认全局安装/卸载；出现 `--`（含裸 `--`）则不注入默认作用域，参数规则见下方“Python 与 Node.js 包”。
   原生包下载时显示进度、已下载/总大小和平均下载速度；终端中每 200 毫秒刷新同一行，
   重定向输出时每 5 秒记录一行。下载结束显示最终状态，命中有效缓存时跳过下载。
 - `switch name version` 只切换已安装的原生版本，一起处理包内全部命令。
@@ -220,7 +220,7 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.9.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
+`OHECO_VERSION` 默认 `0.10.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
 `ohos-sdk-toolchains` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 打包不改变已签名二进制内容：
@@ -229,7 +229,7 @@ OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用
 python3 scripts/package.py --version 0.9.0
 ```
 
-`--version` 省略时同样默认 `0.9.0`。输出 `dist/oheco-0.9.0-ohos-arm64.tar.gz` 和 `.sha256`。
+`--version` 省略时同样默认 `0.10.0`。输出 `dist/oheco-0.10.0-ohos-arm64.tar.gz` 和 `.sha256`。
 同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
@@ -317,6 +317,30 @@ SDK 的 native 原始 ZIP 含 8 对仅大小写不同且内容不同的 Linux ne
 在含空格的安装路径下，可直接使用 `clang --target=aarch64-linux-ohos --sysroot=<native版本目录>/sysroot`；
 原包提供的 target shell 包装脚本没有完整引用路径，不适用于含空格的目录。
 
+## 多版本 SDK 标准目录
+
+安装五个匹配的 SDK 组件后，可离线创建供 Hvigor 使用的固定版本 SDK root：
+
+```sh
+oo install ohos-sdk-native@26.0.0.35-Beta ohos-sdk-ets@26.0.0.35-Beta \
+  ohos-sdk-js@26.0.0.35-Beta ohos-sdk-toolchains@26.0.0.35-Beta \
+  ohos-sdk-previewer@26.0.0.35-Beta
+oo sdk create 26.0.0.35-Beta
+oo sdk list
+export OHOS_SDK_HOME="$(oo sdk path 26.0.0.35.Beta)"
+```
+
+默认布局为 `~/.oheco/sdk/26.0.0.35.Beta/root/26.0.0/{native,ets,js,toolchains,previewer}`。
+五个组件全部是指向精确已安装包版本的相对软链接，ETS 也不例外；不会复制、修改元数据或重签工具。
+包版本仍为 `26.0.0.35-Beta`，外层视图用 `.Beta`，内层按原始 SDK 元数据及 SDKmanager 规则计算。
+`path` 返回外层的 `root`，不是内部的 `26.0.0`。切换组件的 active/automatic 归属或安装时间不改变这个固定视图。
+
+SDK 命令不下载组件、不查 latest，也不启动后台索引更新。缺包一次报告全部缺失组件。
+真实 metadata-only previewer 包可以满足构建识别，但不代表提供预览器程序。
+被视图引用的版本默认不能卸载（包括 cascade/autoremove）；先 `oo sdk remove 26.0.0.35.Beta`，再按需要卸载组件。
+移除视图只 unlink 自身链接、清单和空目录，源包保留。完整规则、失败恢复和旧客户端使用边界见
+[SDK 视图说明](<docs/SDK.md>)；旧版客户端和手工删除不会执行新版本的视图引用保护，请持续使用支持 `oo sdk` 的客户端管理该根。
+
 ## Python 与 Node.js 包
 
 0.5.0 增加 schema v3。包级 `package_manager` 选择 `oheco`、`pip` 或 `npm`，
@@ -327,32 +351,54 @@ SDK 的 native 原始 ZIP 含 8 对仅大小写不同且内容不同的 Linux ne
 ```zsh
 oo update
 oo install <目录包名>
-oo install npm:<npm包名>                    # 作用域由你决定，见下
-oo install npm:<npm包名> -- --global        # 全局安装（npm 的默认是当前项目）
-oo install pip:<Python包名>                 # 使用选定的基础 Python 环境
+oo install npm:<npm包名>                    # 默认全局安装（自动 --global）
+oo install npm:<npm包名> --                 # 不注入默认作用域，npm 通常装进当前项目
+oo install npm:<npm包名> -- --global        # 显式全局安装
+oo install pip:<Python包名>                 # 默认基础解释器的 global site-packages
 oo install pip:<Python包名> -- --target ./vendor
-oo remove npm:<npm包名> -- --global
+oo remove npm:<npm包名>                     # 默认全局卸载
+oo remove npm:<npm包名> --                 # 按 npm 自己的作用域配置卸载
 oo remove pip:<Python包名>
 ```
 
 统一 `oo install` / `oo remove` 按目录记录选择管理器；`npm:<name>` / `pip:<name>` 可显式选择
-生态包。**oo 不替你决定作用域**：它不注入 `--global`、`--local`、`--prefix` 或 `--location`，
-一律沿用后端默认（npm 默认装进当前项目的 `node_modules`，pip 默认装进所选解释器环境）。
-要全局安装或指定目录，就在 `--` 之后自己传，安装与卸载使用相同的作用域。同理，`-y` 只接受 oo
-自己的确认，不代替后端选项。
+生态包。**没有 `--` 时默认全局安装/卸载**：npm 自动加 `--global`；pip 使用基础解释器的
+全局 `site-packages`，不传不存在的 `--global`，也不以 `--user` 代替全局。
+**只要出现 `--` 就取消默认作用域注入**，包括裸 `--`、`-- --loglevel=verbose` 这样只有日志
+参数的情况，不要求尾参包含作用域选项。此时 scope 由后端参数、环境与配置决定，npm 通常回到
+当前项目的 `node_modules`；pip 也不额外加 `--no-user`、`--prefix` 等默认 scope 设置。
+要指定项目、用户目录或独立目录，就在 `--` 后自己传；安装与卸载使用相同作用域。
+`-y` 只接受 oo 自己的确认，不代替后端选项。
 
 `--` 后的参数仅允许用于**单一外部管理器**，不用于原生包或混合管理器操作，作为参数数组传递，
-不经 shell 求值。oo 只往命令行里加三类参数：**改源**（`--registry`、`--@scope:registry`、
+不经 shell 求值；裸 `--` 也遵守这个限制。除了无 `--` 时的默认作用域，oo 会加三类参数：
+**改源**（`--registry`、`--@scope:registry`、
 `--index-url`）、**正确性**（`--replace-registry-host=never`、
 `--omit-lockfile-registry-resolved`、npm 卸载 `--offline`、pip 卸载 `--yes`）与**安全**
-（`--ignore-scripts`、`--only-binary=:all:`），其余（审计、重试、日志、作用域等）都由你传或
-沿用后端默认。`--registry`、额外索引、`find-links`、启用安装脚本等**源与脚本**类参数仍被
+（`--ignore-scripts`、`--only-binary=:all:`），这些保护不因 `--` 而取消。其余审计、重试、
+日志等都由你传或沿用后端默认。`--registry`、额外索引、`find-links`、启用安装脚本等**源与脚本**类参数仍被
 拒绝：oo 必须自己决定源，否则同名上游包会顶替目录里的适配包。`--autoremove` / `--cascade`
 仅用于原生依赖管理。
 
-语言包安装由所选 Python 的 pip 或 PATH 中的 npm 执行。Python 默认使用 PATH 中的
-`python3`，可通过 `OHECO_PYTHON` 选择解释器；npm 的 `--prefix` 可选择独立目录。安装库时，
-应选择实际使用它的 Python 环境或 Node.js 项目。全局 npm 库不会自动成为其他项目的依赖。
+语言包优先使用 oo 已启用的 Python/Node 工具链，其次使用 PATH 中的工具。Python 默认选择
+基础 `python3`，会绕过自动激活的 virtualenv；显式 `OHECO_PYTHON` 始终优先，可指定 venv，
+此时默认全局指该显式解释器自身的 `site-packages`，不是它的基础解释器。npm 的 `--prefix`
+可选择独立目录。安装库时，应选择实际使用它的 Python 环境或 Node.js 项目；全局 npm 库不会
+自动成为其他项目的依赖。全局 npm 命令位于所选 Node 的 `npm prefix --global` 下的 `bin`，不镜像为 oo 的原生命令链接；若该目录不在 shell PATH，可直接用 `"$(npm prefix --global)/bin/<命令>" ...`，或自行配置对应的命令目录。切换 Node 版本后，请检查所选 npm prefix，不假定其他版本的全局包仍可见。
+
+无 `--` 的 pip 操作会关闭 user-site 可见性（`PYTHONNOUSERSITE=1`）；安装加 `--no-user`，
+保证全局目录不可写时明确失败，**不会静默退回 user 安装**。对于有效配置中的 `user=true`、
+`target`、`prefix`、`root`、`python`，以及相应的 `PIP_USER` / `PIP_TARGET` / `PIP_PREFIX` /
+`PIP_ROOT` / `PIP_PYTHON` 环境变量，oo 拒绝执行默认全局操作，而不是悄悄改写目标位置。
+`user=false` 与空的定位设置允许；非空 `PYTHONPATH` / `PYTHONHOME` 也须先清除，避免解释器搜索
+路径偏移。配置按 pip 的 global、当前命令、环境优先级判定；空的高优先级值仍会回退到非空
+低优先级设置，不能用来抵消定位冲突。不修改持久配置或调用者环境。
+默认模式在进入 pip CLI 前，用所选解释器调用 pip 自身的配置加载器检查定位设置，避免
+`global.python` 连 `--version` / `config list` 探测都重定向到另一解释器；这种通用解释器重定向
+不会被空的命令级 `python` 设置抵消。若 pip 不提供可用的配置加载器，默认模式明确失败。
+如确实要尊重这些设置，显式写 `--`（可为空），此时上述默认 scope 防护全部取消，但源和
+脚本/wheel 安全保护仍生效。pip 卸载不支持 `--no-user`，因此仅通过默认模式的解释器环境隐藏
+user-site；卸载仍只移除具名包，不清理依赖。
 
 `oo` 在安装期间启动一个带随机路径的 loopback HTTP 源，但**只提供元数据**，不再代理下载：
 
@@ -368,9 +414,11 @@ oo remove pip:<Python包名>
 完整性保护。`find-links` 不是索引型源，无法在“一个包名一个源”的前提下安全聚合，oo 会明确
 报错而不是静默忽略。
 
-用户的包管理器配置会被正常加载：`~/.npmrc`、项目 `.npmrc`、`NPM_CONFIG_*`、`pip.conf`、
-`PIP_*` 环境变量以及代理设置都会生效（oo 只把 loopback 加进 `NO_PROXY`，只剥离能在工具内部
-执行代码的 `NODE_OPTIONS`）。oo 只强制两件与校验无关的事：npm 禁用安装脚本
+用户的包管理器配置按实际 scope 正常加载：`~/.npmrc`、`NPM_CONFIG_*`、`pip.conf`、
+`PIP_*` 与代理设置都会生效（默认 pip 的定位冲突检查见上文）。npm 的官方配置探测携带与
+安装一致的 global/local、location、prefix 参数；global 模式不会把项目 `.npmrc` 当成有效
+上游源或凭据配置，local 模式才读取项目配置。oo 把 loopback 加进 `NO_PROXY`，剥离能在工具内部
+执行代码的 `NODE_OPTIONS`。另有两件固定的安全保护：npm 禁用安装脚本
 （`--ignore-scripts`），pip 只安装 wheel（`--only-binary=:all:`）。目录里的 scoped 适配包由 oo
 在命令行上强制指向临时源，保证装到适配版本而不是同名的上游版本。
 
@@ -389,7 +437,8 @@ npm 仍使用 `--omit-lockfile-registry-resolved`，锁文件保留版本和完�
 
 语言环境及其依赖由 pip/npm 实时解析和管理，不镜像为 oo 的原生安装记录。安装之后请直接用
 原生 `npm` / `pip` 查询和管理（oo 不再提供 `oo npm` / `oo pip` 子命令）；需要经过 oo 的临时
-源才能完成的动作，用统一 `oo install` / `oo remove`，并在 `--` 之后带上对应的作用域参数。
+源才能完成的动作，用统一 `oo install` / `oo remove`；默认全局无需尾参，其他作用域在 `--`
+之后带上对应参数（或用裸 `--` 明确交给后端配置）。
 pip 会保留被卸载包的依赖；外部后端不保证跨根目录的反向依赖保护。`oo list` 不盘点这些外部
 安装，`oo switch`、`--no-switch` 和 `命令@版本` 链接只适用于原生包；语言包通过安装所需版本切换。
 

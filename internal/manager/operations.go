@@ -14,11 +14,13 @@ import (
 type InstallOptions struct {
 	NoSwitch, Yes, DryRun bool
 	Args                  []string
+	HasBackendArgs        bool // The caller supplied --, including an empty tail.
 }
 
 type RemoveOptions struct {
 	All, AutoRemove, Cascade, Yes, DryRun bool
 	Args                                  []string
+	HasBackendArgs                        bool // The caller supplied --, including an empty tail.
 }
 
 type operationTarget struct {
@@ -69,8 +71,11 @@ func resolveTarget(idx catalog.Index, spec string) (operationTarget, error) {
 	return operationTarget{Name: backend + ":" + name, Backend: backend, Ecosystem: name, Version: version}, nil
 }
 
-func validateTail(groups map[string][]string, args []string) error {
-	if len(args) == 0 {
+func validateTail(groups map[string][]string, provided bool, args []string) error {
+	if !provided && len(args) != 0 {
+		return fmt.Errorf("backend arguments require HasBackendArgs (the -- separator)")
+	}
+	if !provided {
 		return nil
 	}
 	if len(groups) == 0 {
@@ -158,7 +163,7 @@ func (m *Manager) InstallMany(ctx context.Context, specs []string, options Insta
 			}
 			groups[t.Backend] = append(groups[t.Backend], spec)
 		}
-		if err := validateTail(groups, options.Args); err != nil {
+		if err := validateTail(groups, options.HasBackendArgs, options.Args); err != nil {
 			return err
 		}
 		missing := map[string]bool{}
@@ -166,7 +171,7 @@ func (m *Manager) InstallMany(ctx context.Context, specs []string, options Insta
 			if err := validateLanguageTargets(backend, groups[backend], true); err != nil {
 				return err
 			}
-			if err := m.CheckLanguageInstall(ctx, backend, options.Args); err != nil {
+			if err := m.CheckLanguageInstall(ctx, backend, LanguageOptions{Args: options.Args, HasBackendArgs: options.HasBackendArgs}); err != nil {
 				var tool *MissingToolchainError
 				if !errors.As(err, &tool) {
 					return err
@@ -208,7 +213,7 @@ func (m *Manager) InstallMany(ctx context.Context, specs []string, options Insta
 		fmt.Fprintln(m.Out, "Installation plan:")
 		m.printNativePlan(plan)
 		for _, backend := range backendNames(groups) {
-			fmt.Fprintf(m.Out, "  %s: %s (the backend's own default scope; change it with arguments after --)\n", backend, strings.Join(groups[backend], ", "))
+			fmt.Fprintf(m.Out, "  %s: %s (%s)\n", backend, strings.Join(groups[backend], ", "), languageScopeDescription(backend, options.HasBackendArgs))
 			fmt.Fprintf(m.Out, "    %s resolves its own dependencies; oo does not track this installation.\n", backend)
 		}
 		if len(missing) > 0 {
@@ -229,7 +234,7 @@ func (m *Manager) InstallMany(ctx context.Context, specs []string, options Insta
 			}
 		}
 		for _, backend := range backendNames(groups) {
-			if err := m.InstallLanguage(ctx, idx, backend, groups[backend], LanguageOptions{Args: options.Args, Yes: true}); err != nil {
+			if err := m.InstallLanguage(ctx, idx, backend, groups[backend], LanguageOptions{Args: options.Args, HasBackendArgs: options.HasBackendArgs, Yes: true}); err != nil {
 				return fmt.Errorf("%s installation failed: %w; completed native/backend operations are retained, later backends were not run", backend, err)
 			}
 		}
@@ -294,11 +299,11 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 				seen[key] = true
 			}
 		}
-		if err := validateTail(groups, options.Args); err != nil {
+		if err := validateTail(groups, options.HasBackendArgs, options.Args); err != nil {
 			return err
 		}
 		for _, backend := range backendNames(groups) {
-			if err := m.CheckLanguage(ctx, backend, options.Args); err != nil {
+			if err := m.CheckLanguage(ctx, backend, LanguageOptions{Args: options.Args, HasBackendArgs: options.HasBackendArgs}); err != nil {
 				return err
 			}
 		}
@@ -315,6 +320,18 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 			}
 		}
 		candidates, kept := cleanupCandidates(before, removing)
+		planned := make(map[removeKey]bool, len(removing)+len(candidates))
+		for key := range removing {
+			planned[key] = true
+		}
+		if options.AutoRemove {
+			for key := range candidates {
+				planned[key] = true
+			}
+		}
+		if err := m.SDKRemovalGuard(before, stateWithout(before, planned)); err != nil {
+			return err
+		}
 		fmt.Fprintln(m.Out, "Removal plan:")
 		needsConfirmation := len(candidates) > 0 || len(kept) > 0 || options.Cascade || len(groups) > 0
 		for _, key := range orderedRemoveKeys(removing) {
@@ -331,7 +348,7 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 			fmt.Fprintf(m.Out, "  keep %s@%s: %s\n", key.Name, key.Version, kept[key])
 		}
 		for _, backend := range backendNames(groups) {
-			fmt.Fprintf(m.Out, "  %s removes %s; external reverse dependencies are not guaranteed protected by oo.\n", backend, strings.Join(groups[backend], ", "))
+			fmt.Fprintf(m.Out, "  %s removes %s (%s); external reverse dependencies are not guaranteed protected by oo.\n", backend, strings.Join(groups[backend], ", "), languageScopeDescription(backend, options.HasBackendArgs))
 			if backend == "pip" {
 				fmt.Fprintln(m.Out, "    pip dependencies are retained; no automatic dependency cleanup.")
 			}
@@ -359,6 +376,9 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 			fmt.Fprintln(m.Out, "Keeping unused dependencies; use --autoremove to explicitly include them.")
 		}
 		after := stateWithout(before, removing)
+		if err := m.SDKRemovalGuard(before, after); err != nil {
+			return err
+		}
 		if err := after.validate(); err != nil {
 			return err
 		}
@@ -378,7 +398,7 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := m.RemoveLanguage(ctx, backend, groups[backend], LanguageOptions{Args: options.Args, Yes: true}); err != nil {
+			if err := m.RemoveLanguage(ctx, backend, groups[backend], LanguageOptions{Args: options.Args, HasBackendArgs: options.HasBackendArgs, Yes: true}); err != nil {
 				return fmt.Errorf("%s removal failed: %w; native packages were retained; earlier external removals may have completed", backend, err)
 			}
 		}

@@ -30,7 +30,7 @@ func execute(ctx context.Context, args []string) error {
 	// Explicit updates already perform this work. Bootstrap and installation
 	// startup checks must not spawn an updater from a temporary executable.
 	if os.Getenv("OHECO_NO_AUTO_UPDATE") != "1" &&
-		(len(args) == 0 || args[0] != "update" && args[0] != "_bootstrap") {
+		(len(args) == 0 || args[0] != "update" && args[0] != "_bootstrap" && args[0] != "sdk") {
 		_ = startBackgroundUpdate()
 	}
 	return run(ctx, args)

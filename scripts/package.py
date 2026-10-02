@@ -9,7 +9,7 @@ import tarfile
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
-parser.add_argument("--version", default="0.9.0")
+parser.add_argument("--version", default="0.10.0")
 parser.add_argument("--binary", type=Path, default=root / "build/oo")
 parser.add_argument("--output", type=Path, default=root / "dist")
 args = parser.parse_args()
@@ -19,7 +19,7 @@ args.output.mkdir(parents=True, exist_ok=True)
 destination = args.output / f"oheco-{args.version}-ohos-arm64.tar.gz"
 if destination.exists():
     raise SystemExit(f"Refusing to overwrite {destination}; remove a local development build explicitly or publish a new version.")
-inputs = {"bin/oo": args.binary, "README.md": root / "README.md", "LICENSE": root / "LICENSE"}
+inputs = {"bin/oo": args.binary, "README.md": root / "README.md", "LICENSE": root / "LICENSE", "docs/SDK.md": root / "docs/SDK.md"}
 with tarfile.open(destination, "w:gz", format=tarfile.PAX_FORMAT) as archive:
     for name, filename in inputs.items():
         content = filename.read_bytes()

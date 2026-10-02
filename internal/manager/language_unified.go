@@ -21,10 +21,13 @@ import (
 // LanguageOptions applies to one backend operation. Args contains only the
 // caller's options, not additional package targets or an argv separator. Its
 // entries are passed unchanged and in order; oo adds its own safety settings.
+// HasBackendArgs records the -- separator explicitly, even when Args is empty.
+// Only its absence selects oo's default global scope; nil/empty slices do not.
 type LanguageOptions struct {
-	Args   []string
-	Yes    bool
-	DryRun bool
+	Args           []string
+	HasBackendArgs bool
+	Yes            bool
+	DryRun         bool
 }
 
 // MissingToolchainError lets callers offer the native toolchain without parsing
@@ -38,22 +41,62 @@ func (e *MissingToolchainError) Error() string {
 	return fmt.Sprintf("%s toolchain is unavailable: %s", e.Package, e.Reason)
 }
 
-// CheckLanguage validates options and runnable tools without downloading an
-// index, acquiring a lock, changing the environment, or printing a plan.
-func (m *Manager) CheckLanguage(ctx context.Context, backend string, args []string) error {
-	if err := validateLanguageOptions(backend, args); err != nil {
-		return err
-	}
-	_, err := m.languageTool(ctx, backend)
+// CheckLanguage preflights removal options, runnable tools and default pip
+// scope without downloading an index, changing configuration or printing a plan.
+func (m *Manager) CheckLanguage(ctx context.Context, backend string, options LanguageOptions) error {
+	_, err := m.operationLanguageTool(ctx, backend, "uninstall", options)
 	return err
 }
 
-// CheckLanguageInstall preflights a language install before a mixed
-// native/language batch starts committing installations. Removal uses
-// CheckLanguage; both are offline and only validate options and the runnable
-// tool, because oo no longer infers or checks an npm installation scope.
-func (m *Manager) CheckLanguageInstall(ctx context.Context, backend string, args []string) error {
-	return m.CheckLanguage(ctx, backend, args)
+// CheckLanguageInstall preflights before a mixed native/language batch starts
+// committing installations. Both checks are offline and reject pip destination
+// overrides in default-global mode before any native operation is committed.
+func (m *Manager) CheckLanguageInstall(ctx context.Context, backend string, options LanguageOptions) error {
+	_, err := m.operationLanguageTool(ctx, backend, "install", options)
+	return err
+}
+
+func (m *Manager) operationLanguageTool(ctx context.Context, backend, command string, options LanguageOptions) (languageToolchain, error) {
+	if !options.HasBackendArgs && len(options.Args) != 0 {
+		return languageToolchain{}, fmt.Errorf("backend arguments require HasBackendArgs (the -- separator)")
+	}
+	if err := validateLanguageOptions(backend, options.Args); err != nil {
+		return languageToolchain{}, err
+	}
+	if command == "uninstall" {
+		if err := validateLanguageRemovalOptions(backend, options.Args); err != nil {
+			return languageToolchain{}, err
+		}
+	}
+	if backend == "pip" && !options.HasBackendArgs {
+		// Reject interpreter/destination redirects before even probing pip;
+		// PYTHONHOME or PIP_PYTHON can change which interpreter a probe runs.
+		if err := checkDefaultPipEnvironment(languageEnv(backend)); err != nil {
+			return languageToolchain{}, err
+		}
+	}
+	return m.languageToolForOperation(ctx, backend, command, !options.HasBackendArgs)
+}
+
+func setLanguageEnv(env []string, key, value string) []string {
+	result := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if name != key {
+			result = append(result, entry)
+		}
+	}
+	return append(result, key+"="+value)
+}
+
+func languageScopeDescription(backend string, provided bool) string {
+	if provided {
+		return "explicit --: backend scope/configuration, no default scope injected"
+	}
+	if backend == "npm" {
+		return "default global scope (--global); use -- to choose backend scope"
+	}
+	return "default global site-packages of the selected interpreter; no user fallback; use -- to choose backend scope"
 }
 
 // InstallLanguage installs ecosystem roots (catalog roots must be pinned by the
@@ -64,25 +107,23 @@ func (m *Manager) InstallLanguage(ctx context.Context, idx catalog.Index, backen
 	if err := validateLanguageTargets(backend, specs, true); err != nil {
 		return err
 	}
-	if err := validateLanguageOptions(backend, options.Args); err != nil {
-		return err
-	}
-	tool, err := m.languageTool(ctx, backend)
+	tool, err := m.operationLanguageTool(ctx, backend, "install", options)
 	if err != nil {
 		return err
 	}
 	m.describeLanguage(tool)
+	fmt.Fprintln(m.Out, "Scope:", languageScopeDescription(backend, options.HasBackendArgs))
 	fmt.Fprintf(m.Out, "%s install roots: %s\n", backend, strings.Join(specs, ", "))
 	fmt.Fprintln(m.Out, "The backend will resolve and install ecosystem dependencies; this is NOT a complete dependency plan. No oo installation records are written.")
 	if options.DryRun {
 		fmt.Fprintln(m.Out, "Dry run: no registry, downloads, installation, or dependency resolution was started.")
-		m.printLanguageCommand(tool, "install", specs, options.Args)
+		m.printLanguageCommand(tool, "install", specs, options)
 		return nil
 	}
 	if err := m.confirmContext(ctx, "Allow "+backend+" to resolve dependencies and install these roots?", options.Yes); err != nil {
 		return err
 	}
-	return m.runLanguage(ctx, idx, tool, "install", specs, options.Args)
+	return m.runLanguage(ctx, idx, tool, "install", specs, options)
 }
 
 // RemoveLanguage never loads an index or starts a registry. The caller owns the
@@ -92,17 +133,12 @@ func (m *Manager) RemoveLanguage(ctx context.Context, backend string, names []st
 	if err := validateLanguageTargets(backend, names, false); err != nil {
 		return err
 	}
-	if err := validateLanguageOptions(backend, options.Args); err != nil {
-		return err
-	}
-	if err := validateLanguageRemovalOptions(backend, options.Args); err != nil {
-		return err
-	}
-	tool, err := m.languageTool(ctx, backend)
+	tool, err := m.operationLanguageTool(ctx, backend, "uninstall", options)
 	if err != nil {
 		return err
 	}
 	m.describeLanguage(tool)
+	fmt.Fprintln(m.Out, "Scope:", languageScopeDescription(backend, options.HasBackendArgs))
 	fmt.Fprintf(m.Out, "%s remove roots: %s\n", backend, strings.Join(names, ", "))
 	warning := "Cross-root reverse dependency safety is not guaranteed; npm owns removal of its dependency tree."
 	if backend == "pip" {
@@ -111,13 +147,13 @@ func (m *Manager) RemoveLanguage(ctx context.Context, backend string, names []st
 	fmt.Fprintln(m.Out, warning)
 	if options.DryRun {
 		fmt.Fprintln(m.Out, "Dry run: no registry or uninstall was started; the backend environment is unchanged.")
-		m.printLanguageCommand(tool, "uninstall", names, options.Args)
+		m.printLanguageCommand(tool, "uninstall", names, options)
 		return nil
 	}
 	if err := m.confirmContext(ctx, warning+" Continue with "+backend+" uninstall?", options.Yes); err != nil {
 		return err
 	}
-	return m.runLanguage(ctx, catalog.Index{}, tool, "uninstall", names, options.Args)
+	return m.runLanguage(ctx, catalog.Index{}, tool, "uninstall", names, options)
 }
 
 var exactNpmVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
@@ -162,7 +198,7 @@ func validateLanguageTargets(backend string, targets []string, install bool) err
 // the backend unchanged. Bare arguments are forbidden because they could add
 // roots outside the user's plan; unknown values can use --option=value.
 var npmLanguageValues = map[string]bool{
-	"--prefix": true, "-C": true, "--location": true, "--omit": true, "--include": true,
+	"--prefix": true, "-C": true, "--location": true, "-L": true, "--omit": true, "--include": true,
 	"--depth": true, "--loglevel": true, "--logs-dir": true, "--logs-max": true,
 	"--cache": true, "--tag": true, "--install-strategy": true,
 	"--before": true, "--cpu": true, "--os": true, "--libc": true,
@@ -189,7 +225,7 @@ func blockedLanguageOption(backend, key string) bool {
 		if backend == "pip" && strings.HasPrefix(key, "-") && strings.ContainsAny(strings.TrimPrefix(key, "-"), "irefcC") {
 			return true
 		}
-		return backend == "npm" && (strings.Contains(strings.TrimPrefix(key, "-"), "w") || key == "-r" || key == "-c" || (strings.HasPrefix(key, "-C") && key != "-C"))
+		return backend == "npm" && (strings.Contains(strings.TrimPrefix(key, "-"), "w") || key == "-r" || key == "-c" || (strings.ContainsAny(key, "CL") && key != "-C" && key != "-L"))
 	}
 	name := strings.ToLower(strings.TrimPrefix(key, "--"))
 	name = strings.TrimPrefix(name, "no-")
@@ -301,6 +337,10 @@ type languageToolchain struct {
 }
 
 func (m *Manager) languageTool(ctx context.Context, backend string) (languageToolchain, error) {
+	return m.languageToolForOperation(ctx, backend, "", false)
+}
+
+func (m *Manager) languageToolForOperation(ctx context.Context, backend, command string, defaultScope bool) (languageToolchain, error) {
 	t := languageToolchain{backend: backend, env: languageEnv(backend)}
 	missing := func(pkg string, err error) (languageToolchain, error) {
 		if ctx.Err() != nil {
@@ -365,6 +405,20 @@ func (m *Manager) languageTool(ctx context.Context, backend string) (languageToo
 	}
 	if explicit && info.Prefix != info.BasePrefix {
 		t.note += "; explicitly selected virtualenv"
+	}
+	if defaultScope {
+		// uninstall has no --no-user flag. Hide user-site packages from both
+		// commands so default-global removal cannot remove a user installation.
+		t.env = setLanguageEnv(t.env, "PYTHONNOUSERSITE", "1")
+		// Do not enter pip's CLI yet: global.python can redirect even --version
+		// to another interpreter. Import pip, then inspect its configuration
+		// directly under the interpreter we selected before allowing any CLI.
+		if _, err := languageProbe(ctx, t.program, t.env, "-B", "-c", "import pip; print(pip.__version__)"); err != nil {
+			return missing("python3", fmt.Errorf("%s -m pip is unavailable: %w", t.program, err))
+		}
+		if err := m.checkDefaultPipScope(ctx, t, command); err != nil {
+			return t, err
+		}
 	}
 	if _, err := languageProbe(ctx, t.program, t.env, "-B", "-m", "pip", "--version"); err != nil {
 		return missing("python3", fmt.Errorf("%s -m pip is unavailable: %w", t.program, err))
@@ -466,20 +520,21 @@ func catalogScopes(idx catalog.Index) []string {
 	return scopes
 }
 
-// languageCommand never changes the installation scope: every user argument is
-// forwarded unchanged and oo only adds the settings it needs to serve its own
-// metadata and to keep npm from rewriting resolved hosts. npm therefore keeps
-// its own default (local) unless the user passes --global after --.
-func languageCommand(tool languageToolchain, command string, targets, args []string, registryURL string, scopes []string) []string {
+// languageCommand injects default scope only when -- was absent. Explicit
+// arguments are forwarded unchanged; registry/script safety applies in both modes.
+func languageCommand(tool languageToolchain, command string, targets []string, options LanguageOptions, registryURL string, scopes []string) []string {
 	var argv []string
 	if tool.backend == "pip" {
 		argv = []string{"-B", "-m", "pip"}
 	}
 	argv = append(argv, command)
 	argv = append(argv, targets...)
-	argv = append(argv, args...)
+	argv = append(argv, options.Args...)
 	switch tool.backend {
 	case "npm":
+		if !options.HasBackendArgs {
+			argv = append(argv, "--global")
+		}
 		// replace-registry-host=never is required: npm's default rewrites
 		// tarball hosts to the configured registry (oo), which only serves
 		// metadata and would answer 404.
@@ -498,6 +553,11 @@ func languageCommand(tool languageToolchain, command string, targets, args []str
 		}
 	case "pip":
 		if command == "install" {
+			if !options.HasBackendArgs {
+				// Unlike --global, --no-user exists in pip and disables its
+				// automatic fallback when global site-packages is unwritable.
+				argv = append(argv, "--no-user")
+			}
 			argv = append(argv, "--index-url="+registryURL+"/simple/", "--only-binary=:all:")
 		} else if command == "uninstall" {
 			// Unified oo already confirmed the removal once.
@@ -507,16 +567,16 @@ func languageCommand(tool languageToolchain, command string, targets, args []str
 	return argv
 }
 
-func (m *Manager) printLanguageCommand(tool languageToolchain, command string, targets, args []string) {
+func (m *Manager) printLanguageCommand(tool languageToolchain, command string, targets []string, options LanguageOptions) {
 	url := ""
 	if languageNeedsRegistry(command) {
 		url = "<temporary-verified-registry>"
 	}
-	argv := append([]string{tool.program}, languageCommand(tool, command, targets, args, url, nil)...)
+	argv := append([]string{tool.program}, languageCommand(tool, command, targets, options, url, nil)...)
 	fmt.Fprintf(m.Out, "Backend argv: %q\n", argv)
 }
 
-func (m *Manager) runLanguage(ctx context.Context, idx catalog.Index, tool languageToolchain, command string, targets, args []string) error {
+func (m *Manager) runLanguage(ctx context.Context, idx catalog.Index, tool languageToolchain, command string, targets []string, options LanguageOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -526,7 +586,7 @@ func (m *Manager) runLanguage(ctx context.Context, idx catalog.Index, tool langu
 		cfg := registry.Config{Index: idx, Platform: m.Platform, Client: m.Client}
 		switch tool.backend {
 		case "npm":
-			upstream, err := m.npmUpstream(ctx, tool)
+			upstream, err := m.npmUpstream(ctx, tool, options)
 			if err != nil {
 				return err
 			}
@@ -548,7 +608,7 @@ func (m *Manager) runLanguage(ctx context.Context, idx catalog.Index, tool langu
 		url = s.URL
 		scopes = catalogScopes(idx)
 	}
-	cmd := exec.CommandContext(ctx, tool.program, languageCommand(tool, command, targets, args, url, scopes)...)
+	cmd := exec.CommandContext(ctx, tool.program, languageCommand(tool, command, targets, options, url, scopes)...)
 	cmd.Env = tool.env
 	cmd.Stdin = m.In
 	cmd.Stdout, cmd.Stderr = m.Out, m.Out
