@@ -28,9 +28,13 @@ type Receipt struct {
 	Automatic       bool                  `json:"automatic,omitempty"`
 	Dependencies    []InstalledDependency `json:"dependencies,omitempty"`
 }
+
+const StateSchemaVersion = 3
+
 type InstalledPackage struct {
-	Active   string             `json:"active,omitempty"`
-	Versions map[string]Receipt `json:"versions"`
+	Active           string             `json:"active,omitempty"`
+	Versions         map[string]Receipt `json:"versions"`
+	CommandsDisabled bool               `json:"commands_disabled,omitempty"`
 }
 type State struct {
 	SchemaVersion int                         `json:"schema_version"`
@@ -96,13 +100,16 @@ func readJSON(filename string, v any) error {
 }
 
 func (s State) validate() error {
-	if (s.SchemaVersion != 1 && s.SchemaVersion != 2) || s.Packages == nil {
+	if s.SchemaVersion < 1 || s.SchemaVersion > StateSchemaVersion || s.Packages == nil {
 		return fmt.Errorf("unsupported or invalid local state")
 	}
 	owners := map[string]string{}
 	for name, p := range s.Packages {
 		if !catalog.ValidName(name) || len(p.Versions) == 0 {
 			return fmt.Errorf("invalid installed package %q", name)
+		}
+		if p.CommandsDisabled && s.SchemaVersion < 3 {
+			return fmt.Errorf("unlinked commands require local state schema 3")
 		}
 		if p.Active != "" {
 			if _, ok := p.Versions[p.Active]; !ok {
@@ -115,6 +122,9 @@ func (s State) validate() error {
 			}
 			if err := r.Artifact.Validate(); err != nil {
 				return fmt.Errorf("invalid receipt for %s@%s: %w", name, version, err)
+			}
+			if len(r.Artifact.LauncherOptions) != 0 && s.SchemaVersion < 3 {
+				return fmt.Errorf("launcher options require local state schema 3")
 			}
 			if s.SchemaVersion == 1 && (r.Automatic || len(r.Dependencies) != 0 || r.UpstreamVersion != "") {
 				return fmt.Errorf("dependency receipts require local state schema 2")
@@ -136,6 +146,9 @@ func (s State) validate() error {
 				if err != nil || !matches {
 					return fmt.Errorf("invalid dependency version for %s@%s: %s@%s does not satisfy %s", name, version, d.Name, d.Version, d.Constraint)
 				}
+			}
+			if p.CommandsDisabled {
+				continue
 			}
 			for bin := range r.Artifact.Binaries {
 				if owner, ok := owners[bin]; ok && owner != name {
@@ -212,6 +225,9 @@ func (m *Manager) withLock(fn func() error) error {
 func stateLinks(s State) map[string]string {
 	links := map[string]string{}
 	for name, p := range s.Packages {
+		if p.CommandsDisabled {
+			continue
+		}
 		for version, r := range p.Versions {
 			for bin, rel := range r.Artifact.Binaries {
 				if r.Artifact.UsesLauncher(bin) {
@@ -465,9 +481,6 @@ func (m *Manager) commit(before, after State, stage, destination string) error {
 
 // All staged native packages share one journal and one state transition.
 func (m *Manager) commitStages(before, after State, stages map[string]string) error {
-	if err := m.SDKRemovalGuard(before, after); err != nil {
-		return err
-	}
 	if err := after.validate(); err != nil {
 		return err
 	}
@@ -478,8 +491,8 @@ func (m *Manager) commitStages(before, after State, stages map[string]string) er
 	if reflect.DeepEqual(before, after) && len(stages) == 0 {
 		return m.applyLinks(oldLinks, newLinks)
 	}
-	if before.SchemaVersion == 1 && after.SchemaVersion == 2 {
-		backup := filepath.Join(m.Root, "state", "installed.v1.backup.json")
+	if before.SchemaVersion < after.SchemaVersion {
+		backup := filepath.Join(m.Root, "state", fmt.Sprintf("installed.v%d.backup.json", before.SchemaVersion))
 		if _, err := os.Lstat(backup); errors.Is(err, os.ErrNotExist) {
 			if err := writeJSON(backup, before); err != nil {
 				return err

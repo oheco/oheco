@@ -22,7 +22,7 @@ func TestOfficialDomainDefaultAndExplicitOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.IndexURL != "https://oheco.org/index/v5/index.json" {
+	if m.IndexURL != "https://oheco.org/index/v6/index.json" {
 		t.Fatalf("wrong canonical source: %s", m.IndexURL)
 	}
 	custom := "https://mirror.example.test/custom-index.json"

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -155,8 +156,13 @@ func (m *Manager) checkActiveClient(ctx context.Context, after State, stages map
 	check := exec.CommandContext(checkCtx, filepath.Join(directory, p.Versions[p.Active].Artifact.Binaries["oo"]), "--state-schema")
 	check.Env = append(os.Environ(), "OHECO_NO_AUTO_UPDATE=1")
 	output, err := check.CombinedOutput()
-	if err != nil || strings.TrimSpace(string(output)) != "2" {
-		return fmt.Errorf("active oheco@%s cannot manage local state schema 2; upgrade the active client to 0.7.0 or newer before this operation (no native changes committed)", p.Active)
+	supported, parseErr := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil || parseErr != nil || supported < after.SchemaVersion {
+		minimum := "0.7.0"
+		if after.SchemaVersion >= 3 {
+			minimum = "0.11.0"
+		}
+		return fmt.Errorf("active oheco@%s cannot manage local state schema %d; upgrade the active client to %s or newer before this operation (no native changes committed)", p.Active, after.SchemaVersion, minimum)
 	}
 	return nil
 }

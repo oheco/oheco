@@ -320,18 +320,6 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 			}
 		}
 		candidates, kept := cleanupCandidates(before, removing)
-		planned := make(map[removeKey]bool, len(removing)+len(candidates))
-		for key := range removing {
-			planned[key] = true
-		}
-		if options.AutoRemove {
-			for key := range candidates {
-				planned[key] = true
-			}
-		}
-		if err := m.SDKRemovalGuard(before, stateWithout(before, planned)); err != nil {
-			return err
-		}
 		fmt.Fprintln(m.Out, "Removal plan:")
 		needsConfirmation := len(candidates) > 0 || len(kept) > 0 || options.Cascade || len(groups) > 0
 		for _, key := range orderedRemoveKeys(removing) {
@@ -376,9 +364,6 @@ func (m *Manager) RemoveMany(ctx context.Context, specs []string, options Remove
 			fmt.Fprintln(m.Out, "Keeping unused dependencies; use --autoremove to explicitly include them.")
 		}
 		after := stateWithout(before, removing)
-		if err := m.SDKRemovalGuard(before, after); err != nil {
-			return err
-		}
 		if err := after.validate(); err != nil {
 			return err
 		}

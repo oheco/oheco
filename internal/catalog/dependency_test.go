@@ -83,8 +83,8 @@ func TestDependencyRejectsInvalidFields(t *testing.T) {
 }
 
 func TestDependencyJSONAndSchemaV5(t *testing.T) {
-	if SchemaVersion != 5 || DefaultURL != "https://oheco.org/index/v5/index.json" {
-		t.Fatal("schema and default URL must point to v5")
+	if SchemaVersion != 6 || DefaultURL != "https://oheco.org/index/v6/index.json" {
+		t.Fatal("current schema and default URL must point to v6")
 	}
 	d := Dependency{Name: "runtime", Constraint: "*"}
 	data, err := json.Marshal(d)

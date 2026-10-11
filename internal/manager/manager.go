@@ -131,12 +131,15 @@ func (m *Manager) installLocked(ctx context.Context, name, version string, a cat
 		return err
 	}
 	after := cloneState(before)
+	if len(a.LauncherOptions) != 0 {
+		after.SchemaVersion = 3
+	}
 	p := after.Packages[name]
 	if p.Versions == nil {
 		p.Versions = map[string]Receipt{}
 	}
 	if r, exists := p.Versions[version]; exists {
-		if r.Platform != m.Platform || r.Artifact.SHA256 != a.SHA256 || r.Artifact.Size != a.Size || r.Artifact.Format != a.Format || r.Artifact.StripComponents != a.StripComponents || !reflect.DeepEqual(r.Artifact.Binaries, a.Binaries) || !reflect.DeepEqual(r.Artifact.Launchers, a.Launchers) {
+		if r.Platform != m.Platform || r.Artifact.SHA256 != a.SHA256 || r.Artifact.Size != a.Size || r.Artifact.Format != a.Format || r.Artifact.StripComponents != a.StripComponents || !reflect.DeepEqual(r.Artifact.Binaries, a.Binaries) || !reflect.DeepEqual(r.Artifact.Launchers, a.Launchers) || !reflect.DeepEqual(r.Artifact.LauncherOptions, a.LauncherOptions) {
 			return fmt.Errorf("%s@%s is already installed with different contents; publish a new version", name, version)
 		}
 		if err := verifyInstalled(filepath.Join(m.Root, "packages", name, version), r.Artifact); err != nil {
@@ -146,6 +149,9 @@ func (m *Manager) installLocked(ctx context.Context, name, version string, a cat
 			p.Active = version
 		}
 		after.Packages[name] = p
+		if err := m.checkActiveClient(ctx, after, nil); err != nil {
+			return err
+		}
 		if err := m.commit(before, after, "", ""); err != nil {
 			return err
 		}
@@ -205,6 +211,9 @@ func (m *Manager) installLocked(ctx context.Context, name, version string, a cat
 		}
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := m.checkActiveClient(ctx, after, map[string]string{destination: stage}); err != nil {
 		return err
 	}
 	if err := m.commit(before, after, stage, destination); err != nil {
@@ -313,7 +322,11 @@ func (m *Manager) List() error {
 		if who == "" {
 			who = "-"
 		}
-		fmt.Fprintf(table, "%s\toheco\t%s\t%s\n", name, strings.Join(versions, ", "), who)
+		status := strings.Join(versions, ", ")
+		if p.CommandsDisabled {
+			status += " (commands unlinked)"
+		}
+		fmt.Fprintf(table, "%s\toheco\t%s\t%s\n", name, status, who)
 	}
 	if err := table.Flush(); err != nil {
 		return err

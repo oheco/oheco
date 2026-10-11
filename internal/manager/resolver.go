@@ -288,9 +288,14 @@ func (m *Manager) planNative(idx catalog.Index, before State, requests []nativeR
 	if err != nil {
 		return nil, err
 	}
-	plan.After.SchemaVersion = 2
+	if plan.After.SchemaVersion < 2 {
+		plan.After.SchemaVersion = 2
+	}
 	for _, name := range order {
 		v := selected[name]
+		if len(v.Artifacts[m.Platform].LauncherOptions) != 0 {
+			plan.After.SchemaVersion = 3
+		}
 		p := plan.After.Packages[name]
 		if p.Versions == nil {
 			p.Versions = map[string]Receipt{}
@@ -322,9 +327,12 @@ func (m *Manager) planNative(idx catalog.Index, before State, requests []nativeR
 		if _, noSwitchRoot := passive[name]; noSwitchRoot {
 			activate = false
 		}
-		changed := !reflect.DeepEqual(old, r) || (activate && p.Active != v.Version)
+		changed := !reflect.DeepEqual(old, r) || (activate && p.Active != v.Version) || (explicit && activate && p.CommandsDisabled)
 		if activate {
 			p.Active = v.Version
+			if explicit {
+				p.CommandsDisabled = false
+			}
 		}
 		p.Versions[v.Version] = r
 		plan.After.Packages[name] = p
@@ -339,6 +347,9 @@ func (m *Manager) planNative(idx catalog.Index, before State, requests []nativeR
 	sort.Strings(passiveNames)
 	for _, name := range passiveNames {
 		v := passive[name]
+		if len(v.Artifacts[m.Platform].LauncherOptions) != 0 {
+			plan.After.SchemaVersion = 3
+		}
 		// Passive roots are stored independently from the selected active version.
 		// The same version may also already be active; merge its receipt once.
 		p := plan.After.Packages[name]
@@ -405,7 +416,7 @@ func (m *Manager) planNative(idx catalog.Index, before State, requests []nativeR
 // versions keep exact dependency bindings so they can be switched back safely.
 func rebindActive(s *State) error {
 	for name, p := range s.Packages {
-		if p.Active == "" {
+		if p.Active == "" || p.CommandsDisabled {
 			continue
 		}
 		r := p.Versions[p.Active]
@@ -415,6 +426,9 @@ func rebindActive(s *State) error {
 				return fmt.Errorf("%s@%s requires active %s %s", name, p.Active, d.Name, d.Constraint)
 			}
 			actual := target.Versions[target.Active]
+			if target.CommandsDisabled && len(actual.Artifact.Binaries) != 0 {
+				return fmt.Errorf("%s@%s requires %s commands, which are unlinked; restore them with oo switch %s %s", name, p.Active, d.Name, d.Name, target.Active)
+			}
 			ok, err := d.Matches(receiptVersion(target.Active, actual))
 			if err != nil || !ok {
 				return fmt.Errorf("%s@%s requires %s %s; active version %s is incompatible", name, p.Active, d.Name, d.Constraint, target.Active)

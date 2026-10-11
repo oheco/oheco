@@ -2,6 +2,10 @@
 
 鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
+**v0.11.0** 支持官方 `command-line-tools@26.0.0.201` 和按命令配置包内运行环境。
+工具链 Node 不对外创建命令；`oo unlink` 可保留旧安装文件并释放命令入口。
+`oo sdk` 及视图管理已经退出，旧 SDK 安装与工程迁移见 [迁移说明](docs/MIGRATION.md)。
+
 > **v0.8.1** 修正了 0.8.0 的转发缺陷（npm 默认会把 tarball 主机改写成配置的 registry，
 > 导致非目录包 404），并继承 0.8.0 的下载模型变更：oo 只提供元数据——目录里的适配包直连其发布地址
 > （npm 用 `integrity`、pip 用 `#sha256=` 校验），其余包名转发到用户自己配置的源。oo
@@ -65,18 +69,19 @@ export OHECO_ROOT="$HOME/tools/oheco"
 
 ```zsh
 oo update
-oo search ohos-sdk
-oo info ohos-sdk-toolchains
-oo install ohos-sdk-toolchains
-binary-sign-tool@26.0.0.35-Beta -h
+oo search command-line-tools
+oo info command-line-tools
+oo install command-line-tools
+binary-sign-tool@26.0.0.201 -h
+hvigor --version --no-daemon
 oo list
-oo switch ohos-sdk-toolchains 26.0.0.35-Beta
-oo remove ohos-sdk-toolchains@26.0.0.35-Beta
+oo switch command-line-tools 26.0.0.201
+oo remove command-line-tools@26.0.0.201
 oo install oheco
 ```
 
 - `update` 只更新索引，失败保留旧索引；`search`、`info` 查询本地索引。
-- 普通命令会尝试启动独立的后台索引更新进程，包括 `help`、`--version`；`sdk` 命令完全离线，不启动后台更新。
+- 普通命令会尝试启动独立的后台索引更新进程，包括 `help`、`--version`。
   同一 `OHECO_ROOT` 最多一个更新进程，前台不等待，也不显示后台输出；发现更新时自动
   下载、校验并原子替换本地索引，后续命令使用更新后的索引，不升级已安装的软件。
   后台检查间隔至少 30 分钟；网络失败也会等待这个间隔再重试，单次后台任务最多运行 30 秒。
@@ -96,7 +101,9 @@ oo install oheco
   外部包默认全局安装/卸载；出现 `--`（含裸 `--`）则不注入默认作用域，参数规则见下方“Python 与 Node.js 包”。
   原生包下载时显示进度、已下载/总大小和平均下载速度；终端中每 200 毫秒刷新同一行，
   重定向输出时每 5 秒记录一行。下载结束显示最终状态，命中有效缓存时跳过下载。
-- `switch name version` 只切换已安装的原生版本，一起处理包内全部命令。
+- `switch name version` 只切换已安装的原生版本，一起处理包内全部命令，并恢复该包被 unlink 的入口。
+- `unlink name...` 释放原生包的默认与带版本命令链接，保留文件、版本和原始收据；
+  不卸载 npm/pip 包。适用于保留旧 SDK 数据时把同名命令交给新包。
 - 原生 `remove name` 删除当前启用版本；`remove name@version` 删除指定版本；
   `remove name --all` 删除全部版本。删除启用版本后不自动选择其他版本。
   v0.7.0 原生依赖管理提供 `--autoremove` 清理不再需要的自动依赖、`--cascade` 连同
@@ -115,7 +122,7 @@ v0.7.0 的原生依赖使用下述 schema v5；npm/pip 依赖仍由相应后端�
 升级包管理器使用 `oo update && oo install oheco`。
 
 软件目录已收录 Go 原生工具链，可通过 `oo install go` 安装。当前适配包版本为
-`1.27.1-ohos.1`；签名工具（`ohos-sdk-toolchains` 包）、cgo 依赖及系统配置见
+`1.27.1-ohos.1`；签名工具（`command-line-tools` 包）、cgo 依赖及系统配置见
 [Go 适配说明](https://github.com/oheco/go/blob/go1.27.1-ohos.1/misc/harmony/README.md)。
 
 ## v0.7.0：逐版本原生依赖
@@ -171,13 +178,13 @@ schema v5 在 `versions[].dependencies` 声明依赖，对应
 
 ```text
 ~/.oheco/
-  packages/oheco/0.4.0/bin/oo
-  packages/ohos-sdk-toolchains/26.0.0.35-Beta/lib/binary-sign-tool
-  packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
-  bin/oo@0.4.0 -> ../packages/oheco/0.4.0/bin/oo
-  bin/oo -> oo@0.4.0
-  bin/binary-sign-tool@26.0.0.35-Beta -> ../packages/ohos-sdk-toolchains/26.0.0.35-Beta/.oo-launchers/binary-sign-tool
-  bin/binary-sign-tool -> binary-sign-tool@26.0.0.35-Beta
+  packages/oheco/0.11.0/bin/oo
+  packages/command-line-tools/26.0.0.201/sdk/default/openharmony/toolchains/lib/binary-sign-tool
+  packages/command-line-tools/26.0.0.201/.oo-launchers/binary-sign-tool
+  bin/oo@0.11.0 -> ../packages/oheco/0.11.0/bin/oo
+  bin/oo -> oo@0.11.0
+  bin/binary-sign-tool@26.0.0.201 -> ../packages/command-line-tools/26.0.0.201/.oo-launchers/binary-sign-tool
+  bin/binary-sign-tool -> binary-sign-tool@26.0.0.201
   index/index.json
   state/installed.json
   state/lock
@@ -204,7 +211,7 @@ schema v5 在 `versions[].dependencies` 声明依赖，对应
 ## 原生构建
 
 使用已经移植的 OHOS Go 工具链；官方 Go 发行版尚不支持 `GOOS=ohos`。
-可通过 `oo install go` 和 `oo install ohos-sdk-toolchains` 安装 Go 和签名工具。
+可通过 `oo install go` 和 `oo install command-line-tools` 安装 Go 和签名工具。
 在 HarmonyOS 原生 zsh 终端中进入本仓库，将以下示例路径替换为实际源码目录和
 当前应用的私有可写临时目录，并确认 PATH 中的 `go` 为 OHOS 原生工具链：
 
@@ -220,16 +227,16 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.10.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
-`ohos-sdk-toolchains` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
+`OHECO_VERSION` 默认 `0.11.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
+`command-line-tools` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 打包不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.9.0
+python3 scripts/package.py --version 0.11.0
 ```
 
-`--version` 省略时同样默认 `0.10.0`。输出 `dist/oheco-0.10.0-ohos-arm64.tar.gz` 和 `.sha256`。
+`--version` 省略时同样默认 `0.11.0`。输出 `dist/oheco-0.11.0-ohos-arm64.tar.gz` 和 `.sha256`。
 同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
 
 ## 测试与索引生成
@@ -271,11 +278,16 @@ ZIP 和 tar.gz 解压默认处理普通文件的大小写冲突：同一目录�
 启动器随安装事务提交、随版本卸载，支持离线切换和根目录迁移；安装或切换拒绝被修改的启动器。
 `.oo-launchers/` 是保留目录，软件包不能自行携带或引用它。包内安装脚本不会自动执行。
 
-SDK 按组件收录为 `ohos-sdk-native`、`ohos-sdk-toolchains`、`ohos-sdk-ets`、`ohos-sdk-js`、
-`ohos-sdk-previewer`，版本统一为 `26.0.0.35-Beta`。Previewer 当前只有元数据，允许
-`binaries: {}`。ETS/JS 作为开发资源包提供，不创建编译器命令链接；完整应用构建
-需另行配置相应运行环境，内置编译工具的执行验证情况见 [验证记录](docs/VALIDATION.md)。
-当前不支持 LLDB，也不创建 lldb-server 等相关链接。
+官方工具与 SDK 统一收录为 `command-line-tools@26.0.0.201`，保持官方完整目录。
+65 个旧 SDK 命令沿用原名，另提供 `hvigor`、`hvigorw`、`ohpm`；去掉
+`js_rawheap_translator`。ETS/JS/previewer 作为随包资源，不另设组件目录入口。
+本次不新增 LLDB 或 CodeLinter 命令；包内资源保持原样。
+
+schema v6 在产物的 `launcher_options` 中按命令声明 `environment`（变量值为包内相对路径）、
+`path`（包内目录前置到子进程 PATH）、可选 `interpreter: "sh"` 和 `arguments`。
+参数中的 `${PACKAGE_ROOT}` 安全替换为真实包根，其他参数按字面传递，不执行 shell 表达式。
+未配置选项的旧启动器保持原字节格式。Hvigor/OHPM 用包内 Node；不创建
+`node`、`npm`、`npx`、`corepack` 全局链接。
 
 ## 索引兼容与升级
 
@@ -287,19 +299,16 @@ oo install oheco
 oo update
 ```
 
-自 v0.7.1 起默认索引为 `https://oheco.org/index/v5/index.json`，直接访问新域名，
-不再依赖旧 GitHub Pages 地址跳转。显式设置的 `OHECO_INDEX_URL` 仍优先，升级不会擅自
-覆盖用户自定义源；若曾在 shell 配置中设置旧官网地址，请按需改成新 HTTPS 地址。
-索引源改变时，客户端自动重新验证索引缓存，不需要删除安装记录或重新安装已有软件。
+v0.11.0 默认索引为 `https://oheco.org/index/v6/index.json`。显式设置的
+`OHECO_INDEX_URL` 仍优先；升级不会改写用户自定义源。若明确设置了旧官方 v5 地址，
+先通过它升级客户端，再按需改为 v6。源改变时自动重新验证索引缓存，不删除安装记录。
 
-域名迁移不改变索引 schema v5 和安装状态 schema 2。仍保留 v1–v4 索引；生成的
-`index/v1/index.json` 至 `index/v4/index.json` 采用 fail-closed 策略：**移除整个 schema v5 包**，
-不能只删掉依赖字段而让旧客户端不安全地安装。`oheco` 自举包继续使用 schema v1，
-旧客户端可通过旧地址的 HTTPS 重定向取得新版；无法使用旧跳转时，0.6.x 可临时指定
-`https://oheco.org/index/v4/index.json`，0.7.x 可指定新域名的 v5 索引，再升级客户端。
-不能将只支持旧 schema 的客户端直接指向 v5。已发布归档、GitHub Release 下载地址及
-历史验证记录保持不变；官网迁移不意味着软件产物也移出 GitHub。
-安装了 ZIP 或启动器包后应继续使用 0.2.0 或更新的客户端管理它们。
+网站继续生成 v1–v5 索引，省略旧客户端不能解码的整个新格式包。新工具包只出现在 v6，
+不能仅删除包内 Node 配置来伪装成 v5。`oheco` 自举包继续使用 schema v1，旧客户端仍可
+升级。已发布归档、下载地址和历史验证记录保持不变。
+
+包内启动器配置和 unlink 状态需要安装状态 schema 3，active 客户端必须支持 0.11.0。
+首次升级状态时保留相应 `state/installed.vN.backup.json`，完整兼容说明见迁移文档。
 
 v0.7.0 的原生状态迁移写入 **schema 2**，与目录索引的 schema v5 不同；迁移前的记录保存在
 `state/installed.v1.backup.json`。迁移后，**旧客户端不能再管理同一个 `OHECO_ROOT`**。
@@ -317,29 +326,15 @@ SDK 的 native 原始 ZIP 含 8 对仅大小写不同且内容不同的 Linux ne
 在含空格的安装路径下，可直接使用 `clang --target=aarch64-linux-ohos --sysroot=<native版本目录>/sysroot`；
 原包提供的 target shell 包装脚本没有完整引用路径，不适用于含空格的目录。
 
-## 多版本 SDK 标准目录
+## 旧 SDK 与 Hvigor 迁移
 
-安装五个匹配的 SDK 组件后，可离线创建供 Hvigor 使用的固定版本 SDK root：
+五个 `ohos-sdk-*` 和 npm `@oheco/hvigor` 已从当前目录退出，旧收据和安装文件不会
+随更新删除。旧原生包可用 `oo unlink` 释放命令而保留文件；恢复命令使用 `oo switch`。
+旧 npm 适配器由对应 npm 作用域管理，不能通过 unlink 接管。
 
-```sh
-oo install ohos-sdk-native@26.0.0.35-Beta ohos-sdk-ets@26.0.0.35-Beta \
-  ohos-sdk-js@26.0.0.35-Beta ohos-sdk-toolchains@26.0.0.35-Beta \
-  ohos-sdk-previewer@26.0.0.35-Beta
-oo sdk create 26.0.0.35-Beta
-oo sdk list
-export OHOS_SDK_HOME="$(oo sdk path 26.0.0.35.Beta)"
-```
-
-默认布局为 `~/.oheco/sdk/26.0.0.35.Beta/root/26.0.0/{native,ets,js,toolchains,previewer}`。
-五个组件全部是指向精确已安装包版本的相对软链接，ETS 也不例外；不会复制、修改元数据或重签工具。
-包版本仍为 `26.0.0.35-Beta`，外层视图用 `.Beta`，内层按原始 SDK 元数据及 SDKmanager 规则计算。
-`path` 返回外层的 `root`，不是内部的 `26.0.0`。切换组件的 active/automatic 归属或安装时间不改变这个固定视图。
-
-SDK 命令不下载组件、不查 latest，也不启动后台索引更新。缺包一次报告全部缺失组件。
-真实 metadata-only previewer 包可以满足构建识别，但不代表提供预览器程序。
-被视图引用的版本默认不能卸载（包括 cascade/autoremove）；先 `oo sdk remove 26.0.0.35.Beta`，再按需要卸载组件。
-移除视图只 unlink 自身链接、清单和空目录，源包保留。完整规则、失败恢复和旧客户端使用边界见
-[SDK 视图说明](<docs/SDK.md>)；旧版客户端和手工删除不会执行新版本的视图引用保护，请持续使用支持 `oo sdk` 的客户端管理该根。
+`oo sdk` 和视图卸载保护已删除。旧视图仍是指向精确组件版本的链接；显式卸载组件可能
+使其失效。继续使用旧工程时保留源版本，不因安装新包删除旧资源。详细步骤、状态边界
+和 Godot 暂缓迁移说明见 [迁移说明](docs/MIGRATION.md)。
 
 ## Python 与 Node.js 包
 

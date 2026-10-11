@@ -12,7 +12,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.10.0"
+var version = "0.11.0"
 
 const help = `oo — the oheco package manager
 
@@ -25,10 +25,7 @@ Usage:
   oo switch <package> <version>       Activate an installed version (offline)
   oo remove <package[@version]>... [--all] [--autoremove] [--cascade] [-y] [--dry-run] [-- backend-args]
   oo list                            List installed versions (* = active)
-  oo sdk create <package-version>     Link installed SDK components (offline)
-  oo sdk list                        List fixed-version SDK views (offline)
-  oo sdk path <view-id>               Print the SDK root for Hvigor (offline)
-  oo sdk remove <view-id>             Remove a view, retaining its packages
+  oo unlink <native-package>...       Release command links, retaining installed files
   oo recover                         Recover an interrupted operation
   oo --version
 
@@ -59,7 +56,7 @@ Only wheels and prebuilt npm packages are supported; npm scripts are disabled.
 
 Environment:
   OHECO_ROOT        Installation root (default: ~/.oheco)
-  OHECO_INDEX_URL   Index URL (default: https://oheco.org/index/v5/index.json)
+  OHECO_INDEX_URL   Index URL (default: https://oheco.org/index/v6/index.json)
   OHECO_NO_AUTO_UPDATE=1  Disable background index updates
   OHECO_PYTHON      Python executable for pip operations (default: python3 from PATH)
 `
@@ -83,7 +80,7 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 	if len(args) == 1 && args[0] == "--state-schema" {
-		fmt.Println(2)
+		fmt.Println(manager.StateSchemaVersion)
 		return nil
 	}
 	m, err := manager.New(os.Getenv("OHECO_ROOT"), os.Getenv("OHECO_INDEX_URL"), os.Stdout)
@@ -92,8 +89,8 @@ func run(ctx context.Context, args []string) error {
 	}
 	command, args := args[0], args[1:]
 	switch command {
-	case "sdk":
-		return runSDK(ctx, m, args)
+	case "unlink":
+		return m.Unlink(ctx, args)
 	case "export":
 		spec, project, destination, err := exportArgs(args)
 		if err != nil {
