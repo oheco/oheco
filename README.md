@@ -2,8 +2,10 @@
 
 鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
-**v0.11.0** 支持官方 `command-line-tools@26.0.0.201` 和按命令配置包内运行环境。
-工具链 Node 不对外创建命令；`oo unlink` 可保留旧安装文件并释放命令入口。
+**v0.12.0** 新增 `oo daemon` 用户服务管理：单实例后台运行、按服务启停与自动重启、
+stdout/stderr 追加日志，以及异步 zsh autoload。服务管理完全离线，不触发索引更新。
+继续支持官方 `command-line-tools@26.0.0.201` 和按命令配置包内运行环境；
+`oo unlink` 可保留旧安装文件并释放命令入口。
 `oo sdk` 及视图管理已经退出，旧 SDK 安装与工程迁移见 [迁移说明](docs/MIGRATION.md)。
 
 > **v0.8.1** 修正了 0.8.0 的转发缺陷（npm 默认会把 tarball 主机改写成配置的 registry，
@@ -162,6 +164,91 @@ schema v5 在 `versions[].dependencies` 声明依赖，对应
 外部 pip/npm 的依赖解析是运行时行为，不承诺为保留的 pip 依赖提供跨 `OHECO_ROOT`
 的反向依赖保护；删除 Python 顶层包不自动删除其依赖。
 
+## 用户服务：oo daemon
+
+`oo daemon` 启动一个脱离当前终端的后台管理进程，不需要额外执行 `&` 或 `disown`。
+同一个 `OHECO_ROOT` 只运行一个实例；重复或并发启动都安静地退出 `0`。
+服务管理不读取软件索引，也不触发后台索引更新。
+
+服务定义位于 `$OHECO_ROOT/services/<服务名>.json`，默认 `~/.oheco/services/`。
+例如创建 `web.json`（需要已安装 `python3`）：
+
+```json
+{
+  "schema_version": 1,
+  "description": "Local HTTP server",
+  "command": ["python3", "-u", "-m", "http.server", "8080", "--bind", "127.0.0.1"],
+  "working_directory": "/storage/Users/currentUser",
+  "environment": {},
+  "restart": "on-failure",
+  "restart_delay": "2s",
+  "stop_timeout": "10s",
+  "start_limit": {"interval": "30s", "burst": 5}
+}
+```
+
+```zsh
+oo daemon enable web        # 以后启动 daemon 时自动启动，不立即启动服务
+oo daemon                   # 后台启动 daemon 和已启用的服务
+oo daemon status web
+oo daemon stop web          # 现在停止，保留 enabled 设置
+oo daemon start web         # 现在启动，不改变 enabled 设置
+oo daemon restart web       # 重新读取定义并重启
+oo daemon disable web       # 取消自动启动，不停止当前服务
+oo daemon list
+oo daemon shutdown          # 停止全部服务和 daemon，保留 enabled 设置
+```
+
+- `enable` 校验全部目标后一次提交设置；`disable` 允许取消已删除或损坏定义的启用记录。
+  两者及 `list` 可在 daemon 未运行时使用。`start/stop/restart` 要求 daemon 已运行。
+- 服务名和实际文件名必须小写，名称以字母或数字开头，后接字母、数字、点、下划线或横杠，
+  最长 64 字符。定义必须是普通文件，最多 1 MiB；未知字段、非法参数或损坏 JSON 会报错。
+- `command` 是原样传递的 argv，不展开变量、通配符或 shell 语法；需要 shell 时显式使用
+  `["/usr/bin/zsh", "-c", "exec ..."]`。服务应保持前台运行，不应自行 daemonize/setsid。
+- `working_directory` 为绝对路径，省略时为 HOME。环境继承 daemon 启动时的环境，
+  再应用 `environment`；oo 的 `bin` 前置到最终 PATH。新终端的环境变化不会自动更新已有 daemon。
+- `restart` 支持 `no`、`on-failure`（默认）、`always`。重试前等待 `restart_delay`（默认 2 秒），
+  默认 30 秒内最多启动 5 次，超过后进入 `failed`。手动 `start/restart` 重置限流。
+  手动 `stop` 会取消待执行重试；已经启动/停止的服务重复 `start/stop` 成功返回。
+- 每次停止先向服务进程组发送 TERM，等待 `stop_timeout`（默认 10 秒），再发送 KILL。
+  主进程自然退出时也先清理残留子进程再决定是否重启。独立 runner 持有服务锁并监视 daemon
+  的连接；daemon 意外退出时 runner 仍会清理服务，新 daemon 等清理完成后才启动下一份。
+  daemon 也会收养并清理意外退出 runner 的后代，不根据磁盘中的旧 PID 随意发送信号。
+- 每个服务只有 `services/logs/<名称>.stdout.log` 和 `<名称>.stderr.log` 两个输出文件，
+  使用追加写入，启停不截断；当前不自动轮转。daemon 自身诊断另存 `services/.state/daemon.log`。
+- 定义修改在下次手动 `start/restart` 生效；自动重试使用该次手动启动时的定义。
+  `start` 成功表示程序成功执行，不代表 HTTP、端口等应用层已经就绪。
+
+`oo daemon status` 查看 daemon 及服务；`status web` 查看指定服务。`--json` 提供结构化输出，
+`--quiet` 不输出内容并通过退出码判断状态。daemon 未就绪或指定服务不在运行时，`status`
+退出 `1`；已运行的 daemon 总体状态不因某个服务失败而退出 `1`。`list --json` 也可离线查询。
+`oo daemon --foreground` 可用于前台调试，TERM/INT 或 `shutdown` 会停止其服务后退出。
+
+```zsh
+oo daemon autoload          # 安装到 ${ZDOTDIR:-$HOME}/.zshrc
+oo daemon autoload --print  # 只查看将写入的脚本
+oo daemon autoload --remove # 移除脚本，不停止 daemon
+```
+
+autoload 写入带起止标记的片段，用稳定的 `<root>/bin/oo` 和固定 `OHECO_ROOT` 异步执行一次
+`oo daemon ... &!`；检查由 daemon 的非阻塞锁完成，不额外同步调用 `status`。
+重复执行只更新自己的片段，保留其他配置和 `.zshrc` 软链接；异常或重复标记会拒绝修改。
+修改使用同目录的固定锁和写入日志，完整写入后原子替换软链接的实际目标，保留原权限。
+新提示符无需等待 oo 初始化或服务启动，因此首次提示符出现时服务可能仍在启动。
+
+启用设置和固定锁文件保存在 `services/.state/`。控制 socket 位于应用私有 TMPDIR 的
+`ood-*` 目录，并通过根目录内的 endpoint 记录发现；运行目录必须真正支持私有权限，
+不能把 TMPDIR 指向鸿蒙 HOME/hmdfs。不同终端即使 TMPDIR 不同也使用同一个根目录锁。
+普通 zsh 退出和终端挂断不会停止服务；系统强制终止整个终端应用或后台清理仍可能停止它们。
+autoload 只在打开 zsh 时恢复，不是系统开机启动或阻止应用休眠的机制。
+
+运行中的 daemon 保持启动时的版本和环境，`status` 会显示其版本；通过打开的签名可执行文件
+启动相同版本 runner，因此切换或卸载旧 oo 文件不会打断后续服务启动。升级后如需 daemon
+使用新版本，执行 `oo daemon shutdown`，再执行 `oo daemon`。
+
+原生端到端验收：`python3 scripts/test-daemon-native.py build/oo`；单独选择用例可加
+`--case zsh-autoload-pty-survival`。测试仅使用私有 TMPDIR 中的隔离配置和进程。
+
 ## 目录和配置
 
 默认安装到 `~/.oheco`；`OHECO_ROOT` 可指定其他根目录。
@@ -178,11 +265,11 @@ schema v5 在 `versions[].dependencies` 声明依赖，对应
 
 ```text
 ~/.oheco/
-  packages/oheco/0.11.0/bin/oo
+  packages/oheco/0.12.0/bin/oo
   packages/command-line-tools/26.0.0.201/sdk/default/openharmony/toolchains/lib/binary-sign-tool
   packages/command-line-tools/26.0.0.201/.oo-launchers/binary-sign-tool
-  bin/oo@0.11.0 -> ../packages/oheco/0.11.0/bin/oo
-  bin/oo -> oo@0.11.0
+  bin/oo@0.12.0 -> ../packages/oheco/0.12.0/bin/oo
+  bin/oo -> oo@0.12.0
   bin/binary-sign-tool@26.0.0.201 -> ../packages/command-line-tools/26.0.0.201/.oo-launchers/binary-sign-tool
   bin/binary-sign-tool -> binary-sign-tool@26.0.0.201
   index/index.json

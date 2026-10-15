@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,10 +10,11 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/oheco/oheco/internal/daemon"
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.11.0"
+var version = "0.12.0"
 
 const help = `oo — the oheco package manager
 
@@ -27,6 +29,7 @@ Usage:
   oo list                            List installed versions (* = active)
   oo unlink <native-package>...       Release command links, retaining installed files
   oo recover                         Recover an interrupted operation
+  oo daemon [command]                Manage user services (oo daemon --help)
   oo --version
 
 install activates the selected version unless --no-switch is given.
@@ -65,6 +68,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := execute(ctx, os.Args[1:]); err != nil {
+		if errors.Is(err, daemon.ErrStatus) {
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, "oo:", err)
 		os.Exit(1)
 	}

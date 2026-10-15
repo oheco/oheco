@@ -8,10 +8,14 @@ import (
 	"os/exec"
 	"syscall"
 
+	"github.com/oheco/oheco/internal/daemon"
 	"github.com/oheco/oheco/internal/manager"
 )
 
 func execute(ctx context.Context, args []string) error {
+	if daemon.Handles(args) {
+		return daemon.Execute(ctx, args, os.Stdout, version)
+	}
 	if len(args) > 0 && args[0] == "_update" {
 		if len(args) != 1 {
 			return fmt.Errorf("invalid background update arguments")
