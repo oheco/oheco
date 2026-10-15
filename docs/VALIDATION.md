@@ -4,6 +4,53 @@
 当前安装方式与支持范围见 [README](../README.md)，可用软件版本见
 [软件下载站](https://oheco.org/)。
 
+## 2026-10-15 · 0.12.0 用户服务发行验收
+
+- 实现与发行标签目标：`f1a8cb91b42794b95333476408e958e0653da218`，基线为
+  `b29bdfda80e6087d4873984377338d70c601770e`（0.11.0）。原有安装状态 schema 和索引 schema 不变。
+- HarmonyOS arm64、原生 Go 1.27.1、`CGO_ENABLED=0`、PATH 中的 `binary-sign-tool`。
+  使用新的 `$XDG_CACHE_HOME/oheco-0.12.0` 构建缓存验证完整签名流程；最终包从干净实现提交重新构建，
+  `go version -m` 确认为该提交且 `vcs.modified=false`。未引入第三方依赖或临时联网构建输入。
+- 原生全量 `go test -p 2 -count=1 ./...`、`go vet -p 2 ./...` 和 gofmt 检查通过。
+  [Linux Go 1.23 CI（含 race）](https://github.com/oheco/oheco/actions/runs/38708071039) 通过。
+- [原生验收脚本](../scripts/test-daemon-native.py) 的 13 项全部通过：并发单实例；enable 与当前状态分离；
+  追加的两路日志和字面 argv/cwd/env/PATH；坏定义隔离；重启限流及取消重试；daemon SIGKILL 后立即重建；
+  主进程自然退出的孙进程清理；同会话内不同 PGID 清理；runner SIGKILL；报告管道中断；
+  zsh autoload/PTY 退出；原映像删除及入口切换；前台模式。
+- autoload 验收故意把 oo 执行延迟 3 秒，要求 zsh 在 2 秒内退出并关闭 PTY，随后 daemon 和服务仍成功启动。
+  标记幂等、无末尾换行原样恢复、特殊路径、ZDOTDIR、软链接、权限保留、并发写入、损坏标记及写入日志
+  被替换成软链接时保留原配置，均通过单元测试和原生流程。未改写用户真实 zsh 配置。
+- 明确复现并固化：报告管道关闭时旧实现被 SIGPIPE 结束（退出 -13）；修复后 runner 完成清理并退出 0。
+  鸿蒙在进程退出期间读取 `/proc/<pid>/stat` 会偶发 EINVAL；实现和验收脚本有限重试，不据此认定 PID 已消失。
+- [发行包安装脚本](../scripts/test-daemon-install-native.py) 在真实官方 v6 索引下载 0.11.0，
+  由旧客户端安装最终候选归档并验证版本入口、daemon/日志/autoload、0.11/0.12 切换、全卸载和配置保留。
+  删除全部已安装 oo 映像后，原 daemon 仍可启动 runner 并正常关闭。所有配置和进程均在私有 TMPDIR 隔离。
+- [v0.12.0 Release](https://github.com/oheco/oheco/releases/tag/v0.12.0) 已正式发布为 Latest，
+  重新下载核对资产名、大小、归档 SHA-256 和校验文件一致。归档大小 **3,322,569 字节**，SHA-256：
+  `cfa050f9be9a2e5a8f5e3a508fa8d37e1845ec855427a3048624f4d905fd1e24`。
+- 目录提交 `6017b76d4392552184a9d0e4c1adf67e283d65d8`，`sh scripts/build.sh` 和
+  `node scripts/test-site.cjs` 通过（25 个包，自举版本 0.12.0；网站测试使用模拟 DOM，不声称浏览器渲染验收）。
+- [Pages 构建与部署](https://github.com/oheco/oheco-packages/actions/runs/38708813508) 成功。
+  通过必需代理复核 `https://oheco.org/`、默认 v6 索引和安装脚本：latest=0.12.0，URL、大小和 SHA-256 全部一致。
+- 正式默认索引的隔离安装复核通过：真实下载 0.11.0，由旧客户端刷新正式索引、下载 GitHub 上的 0.12.0，
+  检查默认/版本入口、服务启停与日志、autoload、离线切换和全卸载；卸载后仍由固定映像启动服务并正常关闭。
+  元数据与制品分别来自 oheco.org 和 GitHub，未用本地 fixture 替代正式安装。测试结束后隔离配置和进程已清理。
+
+复现主要命令（从仓库根执行，按环境设置真实的 TMPDIR 和必需代理）：
+
+```zsh
+CGO_ENABLED=0 go test -p 2 -count=1 ./...
+CGO_ENABLED=0 go vet -p 2 ./...
+GOCACHE="$XDG_CACHE_HOME/oheco-0.12.0" OHECO_GO="$(command -v go)" sh scripts/build-ohos.sh
+python3 scripts/test-daemon-native.py build/oo
+python3 scripts/test-daemon-install-native.py --archive dist/oheco-0.12.0-ohos-arm64.tar.gz
+python3 scripts/test-daemon-install-native.py --published
+```
+
+本机完整日志位于被 Git 忽略的 `build/daemon-{build,native,unit-final,vet-final,install-candidate,install-published,pages,online}.log`。
+普通终端退出和 PTY 挂断已验证；系统强制结束整个应用不承诺存活；主动 daemonize/setsid 不在服务契约内。
+这些结果针对本机 HarmonyOS 环境，未推广为所有设备/系统版本的保证。
+
 ## 2026-09-12 · 0.2.0 开发验证
 
 - 系统 `/usr/bin/zip` 3.0、`/usr/bin/unzip` 6.0 可用。使用 unzip 解出原始
