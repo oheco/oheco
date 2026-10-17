@@ -61,6 +61,24 @@ func TestProjectPackageOutputsDefault(t *testing.T) {
 	}
 }
 
+func TestProjectPackageOutputsSDKDefaultProductMappings(t *testing.T) {
+	// Published Blender 5.2.2-ohos.17 declares targets:[{name:'default'}].
+	// SDK ProjectExtraInfoService maps missing/empty applyToProducts to default.
+	for _, declaration := range []string{
+		`[{name:'entry',srcPath:'entry'}]`,
+		`[{name:'entry',srcPath:'entry',targets:[{name:'default'}]}]`,
+		`[{name:'entry',srcPath:'entry',targets:[{name:'default',applyToProducts:[]}]}]`,
+	} {
+		i := projectPackageOutputsFixture(t, "default", declaration)
+		projectPackageOutputsModule(t, i, "entry", "entry", "")
+		projectPackageOutputsWant(t, i, "entry/build/default/outputs/default/entry-default-signed.hap")
+		i.metadata.productName = "other"
+		if _, err := i.packageOutputs(); err == nil {
+			t.Fatal("default mapping selected for an unrelated product")
+		}
+	}
+}
+
 func TestProjectPackageOutputsProductsAndTargets(t *testing.T) {
 	i := projectPackageOutputsFixture(t, "phone", `[
 		{name:'entry',srcPath:'app',targets:[
@@ -84,7 +102,6 @@ func TestProjectPackageOutputsProductsAndTargets(t *testing.T) {
 	projectPackageOutputsWant(t, i,
 		"app/build/phone/outputs/phoneMain/entry-phoneMain-signed.hap",
 		"app/build/phone/outputs/phoneExtra/phone extra.hap",
-		"feature/build/phone/outputs/default/feature-default-signed.hap",
 		"shared/build/phone/outputs/sharedTarget/public library.hsp")
 
 	i.metadata.productName = "tablet"
@@ -92,7 +109,6 @@ func TestProjectPackageOutputsProductsAndTargets(t *testing.T) {
 	projectPackageOutputsWant(t, i,
 		"app/build/tablet/outputs/phoneMain/entry-phoneMain-signed.hap",
 		"app/build/tablet/outputs/tabletOnly/entry-tabletOnly-signed.hap",
-		"feature/build/tablet/outputs/default/feature-default-signed.hap",
 		"excluded/build/tablet/outputs/default/excluded-default-signed.hap")
 }
 

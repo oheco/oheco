@@ -108,12 +108,14 @@ func projectPackageIdentifier(name string) bool {
 	return projectIdentifier.MatchString(name) && !strings.Contains(name, "..")
 }
 
-// Missing root target mappings mean default; explicit mappings only select the
-// targets whose applyToProducts contains this product.
+// The SDK maps omitted or empty applyToProducts to the default product.
 func projectPackageTargets(module map[string]any, product string) ([]string, error) {
 	raw, exists := module["targets"]
 	if !exists {
-		return []string{"default"}, nil
+		if product == "default" {
+			return []string{"default"}, nil
+		}
+		return nil, nil
 	}
 	entries, ok := raw.([]any)
 	if !ok {
@@ -128,12 +130,16 @@ func projectPackageTargets(module map[string]any, product string) ([]string, err
 			return nil, fmt.Errorf("invalid target identifier %q", name)
 		}
 		rawProducts, exists := target["applyToProducts"]
-		if !exists {
-			continue
-		}
-		products, ok := rawProducts.([]any)
-		if !ok {
-			return nil, fmt.Errorf("target %s has invalid applyToProducts", name)
+		products := []any{"default"}
+		if exists {
+			var ok bool
+			products, ok = rawProducts.([]any)
+			if !ok {
+				return nil, fmt.Errorf("target %s has invalid applyToProducts", name)
+			}
+			if len(products) == 0 {
+				products = []any{"default"}
+			}
 		}
 		for _, rawProduct := range products {
 			mapped, ok := rawProduct.(string)

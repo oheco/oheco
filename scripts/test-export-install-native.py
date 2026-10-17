@@ -124,7 +124,7 @@ if(process.argv[3]==='scaffold') for(const file of ['oh-package.json5','entry/oh
 '''
             run([args.node, '-e', configure, '--', clt / 'hvigor/hvigor-ohos-plugin/node_modules/json5', source, 'catalog' if args.source_package else 'scaffold', clt / 'sdk/default/sdk-pkg.json'])
             archive = root / 'fixture.zip'
-            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
+            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as output:
                 for filename in sorted(source.rglob('*')):
                     if filename.is_file():
                         output.write(filename, Path('project') / filename.relative_to(source))
