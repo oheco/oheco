@@ -4,6 +4,64 @@
 当前安装方式与支持范围见 [README](../README.md)，可用软件版本见
 [软件下载站](https://oheco.org/)。
 
+## 2026-10-17 · 0.13.0 工程导出、签名和安装
+
+当前状态：原生验收全部通过，[v0.13.0](https://github.com/oheco/oheco/releases/tag/v0.13.0)
+已正式发布并设为 Latest；目录、Pages、正式索引安装与工程导出复核全部完成。
+
+- 实现提交：`da0e8641f1a7de46222f645ca8357cc3dae32548`。HarmonyOS arm64、原生 Go 1.27.1、
+  `CGO_ENABLED=0`，由 PATH 中的 `binary-sign-tool` 完成最终可执行文件签名。
+- 从新的 `$XDG_CACHE_HOME/oheco-0.13.0-sdk-deps-20261017` 构建；`go version -m` 确认上述
+  `vcs.revision`、`vcs.modified=false`，版本入口为 `oo 0.13.0 (ohos/arm64)`。
+- [工程安装验收脚本](../scripts/test-export-install-native.py) 的微型工程链路通过：不同 origin 的
+  索引与项目制品、dry-run 无写入、含空格导出目录、官方开发签名、OHPM/Hvigor 构建、模块签名及
+  Profile 校验、HDC 覆盖安装、设备实际 bundle/versionCode 确认、同命令恢复及用户修改保留。
+- 使用正式 v6 索引下载的 `godot-editor@4.7.2-ohos.6` 工程，以上完整链路通过；下载归档大小
+  `76859548` 字节，SHA-256 `0019ce5f3176b75517584976d2b6ecce84a59ba20ee84dd8ebaad640837c2562`。
+  在自有测试副本中只重设 fixture bundle/版本并移除签名配置，保留项目依赖和实际源码。
+- 使用正式索引的 `blender@5.2.2-ohos.17` 同样通过完整导出、签名、安装与同命令恢复链路；
+  原发布归档大小 `143782689` 字节，SHA-256
+  `536c42361fbffae4dcacc3ce0fccf1de0536c216d49f0151196612541d7edb05`。
+  保留真实源码和依赖，测试副本改用 fixture bundle/version。缺省 `applyToProducts` 按 SDK 映射至
+  default 产品；仅在 OHPM 安装期间排除 CLT 自带的两个工具开发依赖，其余依赖保留。
+  真实根 `oh-package.json5` 在两次安装后均恢复原字节，摘要
+  `1c910ba416c76f4db3bbaff65d8d46c012ad2ebb61be1af1a605f92107d875fd`。
+- 工具环境：CLT `26.0.0.201`、内置 Node `24.18.1`、官方 DevEco CLI `1.3.5`、设备 API 26。
+  复核范围止于导出工程、构建签名、安装和版本确认；不启动或测试 Godot/Blender 应用功能。
+  测试使用自有 fixture bundle，不替换已有应用；结束只卸载该自有 bundle。
+- 采用 SDK 公开工程构建任务产生的签名 HAP/HSP，并按 product/target/artifactName 精确选择新产物。
+  oo 不提供现成 HAP 的签名入口。当前原生 SDK 的可选 all-signed APP 扩展依赖 Java 解包工具，
+  该扩展未启用；无需 Java。保留的定向进程适配仅修正已知 SDK rootDir 工程边界缺陷。
+- 客户端定向测试、真实 SDK 工程边界/大小写/EACCES 回归、全量 `go vet ./...` 与补丁检查通过。
+  [Go 1.23 CI](https://github.com/oheco/oheco/actions/runs/39013580246) 的 race、vet 和格式检查通过。
+  SDK 缺省 `applyToProducts` 的真实 Blender 配置已固化为默认产品映射回归。
+  JSON5 的六份实现源码及许可证与 `tpr/json5` 内固定的完整上游快照逐字节一致。
+- 原生 `CGO_ENABLED=0 GOMAXPROCS=2 go test -p 1 ./...` 全部通过；在 SDK 空闲时串行运行，
+  当前提交 manager 用时 258.858 秒，registry 用已有通过缓存（此前完整运行 133.226 秒）。
+  新增 SDK 工具依赖剔除及原字节恢复、真实子进程 SIGKILL 后恢复、外部修改保留测试均通过。
+- 发行包大小 `3485372` 字节，SHA-256
+  `6ae4aa5b0baad2bbe84bfab9a5fa121baa6ac6acd32e5dc9ed68940572edc220`。
+  签名可执行字节保留、原生执行权限、含空格路径解包/迁移、版本/help 和文档许可证布局均通过。
+
+本机链路记录位于 `$XDG_CACHE_HOME` 下的 `oo-export-install-20261017-native-success`、
+`oheco-0.13.0-godot-native-20261017`、`oheco-0.13.0-blender-sdk-deps-20261017` 和
+`oheco-0.13.0-release-sdk-deps-20261017`；正式站点复核位于 `oheco-0.13.0-published-20261017`。
+这些结果针对本机 HarmonyOS/API 26 环境，不推广为所有设备与系统版本的保证。
+
+目录提交 `e4406adcd3f698e8fcab8a18cc9d0f37fbca12bf` 仅更新 oheco 版本和 Blender 使用说明；
+隔离工作树重接最新远端后构建通过（25 包、自举 0.13.0），网站 DOM/复制/工程入口回归通过。
+[Pages 构建与部署](https://github.com/oheco/oheco-packages/actions/runs/39014647639) 成功。
+正式 [v6 索引](https://oheco.org/index/v6/index.json) 的 `generated_at` 为
+`2026-10-17T07:43:07Z`，客户端 latest=0.13.0，下载 URL、大小和 SHA-256 均与正式 Release 一致；
+官网和 `install.sh` 同样通过复核，GitHub Latest 的远端 asset digest 与本地一致。
+
+[正式索引验收脚本](../scripts/test-export-install-published.py) 使用私有安装根、HOME、XDG 和 TMPDIR，
+从官方索引安装 0.12.0，再由旧客户端刷新索引并下载正式 GitHub 0.13.0；默认和版本入口及实际软链接
+均正确。正式 `godot-editor@4.7.2-ohos.7`、`blender@5.2.2-ohos.17` 的 app 工程导出至含空格路径通过，
+对已导出目录和新目录的 `--install --dry-run` 均未创建 receipt、锁或新目录。
+阻断网络代理后切换 0.12/0.13 及卸载全部版本通过，临时安装、配置和源码副本已清理。
+本轮正式复核不再次构建、签名或启动应用；设备安装证据来自发布前的原生验收。
+
 ## 2026-10-15 · 0.12.0 用户服务发行验收
 
 - 实现与发行标签目标：`f1a8cb91b42794b95333476408e958e0653da218`，基线为
