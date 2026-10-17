@@ -14,7 +14,7 @@ import (
 	"github.com/oheco/oheco/internal/manager"
 )
 
-var version = "0.12.0"
+var version = "0.13.0"
 
 const help = `oo — the oheco package manager
 
@@ -23,7 +23,7 @@ Usage:
   oo search [query]                   Search the local package index
   oo info <package>                   Show available versions and package details
   oo install <package[@version]>... [--no-switch] [-y] [--dry-run] [-- backend-args]
-  oo export <package[@version]> [project] [-o|--output directory]
+  oo export <package[@version]> [project] [-o|--output directory] [--install [--device value] [--team value] [--product value] [-y] [--dry-run]]
   oo switch <package> <version>       Activate an installed version (offline)
   oo remove <package[@version]>... [--all] [--autoremove] [--cascade] [-y] [--dry-run] [-- backend-args]
   oo list                            List installed versions (* = active)
@@ -35,7 +35,11 @@ Usage:
 install activates the selected version unless --no-switch is given.
 export writes an editable project into the current directory by default.
 The project name is optional when the version provides exactly one project.
-Existing files and directories are not overwritten; export does not install.
+Existing files and directories are not overwritten by ordinary export.
+export --install prepares tools, obtains debug signing materials, builds and
+replace-installs the exported DevEco project. Login uses browser authorization;
+unlock and trust the selected device. Repeating the same --install command can
+resume a retained export. --dry-run shows the plan without downloads or devices.
 remove without a version removes the active version; --all removes every version.
 update refreshes metadata only. To update oo itself: oo update && oo install oheco
 Commands also refresh the index in the background without waiting.
@@ -98,11 +102,11 @@ func run(ctx context.Context, args []string) error {
 	case "unlink":
 		return m.Unlink(ctx, args)
 	case "export":
-		spec, project, destination, err := exportArgs(args)
+		spec, project, destination, options, err := exportArgs(args)
 		if err != nil {
 			return err
 		}
-		return m.Export(ctx, spec, project, destination)
+		return m.ExportWithOptions(ctx, spec, project, destination, options)
 	case "update":
 		if len(args) != 0 {
 			break

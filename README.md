@@ -2,8 +2,9 @@
 
 鸿蒙原生软件包管理器，使用 Go 编写，二进制名为 `oo`。支持 HarmonyOS arm64。
 
-**v0.12.0** 新增 `oo daemon` 用户服务管理：单实例后台运行、按服务启停与自动重启、
-stdout/stderr 追加日志，以及异步 zsh autoload。服务管理完全离线，不触发索引更新。
+**v0.13.0** 新增 `oo export 包名 app --install`：自动准备工具、委托官方 CLI 登录并生成
+开发签名材料、构建 APP，再通过 HDC 覆盖安装并核对设备端版本。支持同命令恢复、已有签名配置复用、
+HTTP/SOCKS5 代理及独立设备选择。`oo daemon` 继续提供后台用户服务管理。
 继续支持官方 `command-line-tools@26.0.0.201` 和按命令配置包内运行环境；
 `oo unlink` 可保留旧安装文件并释放命令入口。
 `oo sdk` 及视图管理已经退出，旧 SDK 安装与工程迁移见 [迁移说明](docs/MIGRATION.md)。
@@ -118,7 +119,8 @@ oo install oheco
 - `oheco` 自身作为普通包更新和切换；删除 `oheco` 的启用版本也会删除默认 `oo`
   链接，可通过保留的 `oo@版本` 或安装脚本恢复。
 
-`oo` 安装预编译原生产物，不执行原生包内安装脚本；不提供源码构建、自动升级或服务管理。
+`oo install` 安装预编译原生产物，不执行原生包内安装脚本。显式使用 `oo export --install`
+会执行导出的 DevEco 工程构建、调试签名和应用安装；用户服务由 `oo daemon` 管理。
 v0.7.0 的原生依赖使用下述 schema v5；npm/pip 依赖仍由相应后端实时解析。
 升级软件时先执行 `oo update`，再执行 `oo install <包名>`；
 升级包管理器使用 `oo update && oo install oheco`。
@@ -265,11 +267,11 @@ autoload 只在打开 zsh 时恢复，不是系统开机启动或阻止应用休
 
 ```text
 ~/.oheco/
-  packages/oheco/0.12.0/bin/oo
+  packages/oheco/0.13.0/bin/oo
   packages/command-line-tools/26.0.0.201/sdk/default/openharmony/toolchains/lib/binary-sign-tool
   packages/command-line-tools/26.0.0.201/.oo-launchers/binary-sign-tool
-  bin/oo@0.12.0 -> ../packages/oheco/0.12.0/bin/oo
-  bin/oo -> oo@0.12.0
+  bin/oo@0.13.0 -> ../packages/oheco/0.13.0/bin/oo
+  bin/oo -> oo@0.13.0
   bin/binary-sign-tool@26.0.0.201 -> ../packages/command-line-tools/26.0.0.201/.oo-launchers/binary-sign-tool
   bin/binary-sign-tool -> binary-sign-tool@26.0.0.201
   index/index.json
@@ -314,17 +316,20 @@ build/oo --version
 
 `go env GOHOSTOS GOHOSTARCH` 应输出 `ohos` 和 `arm64`。也可以将 `OHECO_GO` 设置为
 OHOS Go 可执行文件的绝对路径；未设置时，构建脚本默认使用相邻 `go/bin/go`。
-`OHECO_VERSION` 默认 `0.11.0`。OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
+`OHECO_VERSION` 默认 `0.13.0`，`OHECO_BUILD_DIR` 可将产物定向到应用的 `XDG_CACHE_HOME`。
+OHOS Go 工具链自动调用 PATH 中的 `binary-sign-tool`（由
 `command-line-tools` 包提供）签名，工具缺失时检查 LLVM 工具目录的 PATH。普通用户运行已签名的 `oo` 无需编译工具。
 
 打包不改变已签名二进制内容：
 
 ```sh
-python3 scripts/package.py --version 0.11.0
+python3 scripts/package.py --version 0.13.0
 ```
 
-`--version` 省略时同样默认 `0.11.0`。输出 `dist/oheco-0.11.0-ohos-arm64.tar.gz` 和 `.sha256`。
-同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README 和 MIT 许可证。
+`--version` 省略时同样默认 `0.13.0`。输出 `dist/oheco-0.13.0-ohos-arm64.tar.gz` 和 `.sha256`。
+可用 `--binary` 指定缓存目录中的已签名二进制，用 `--output` 指定归档输出目录。
+同名文件不会被覆盖；本地打包不代表该版本已发布。包内包含 `bin/oo`、README、MIT 许可证，
+以及完整保留的 JSON5 解码器上游许可和来源记录。
 
 ## 测试与索引生成
 
@@ -553,7 +558,8 @@ python3 scripts/test-language-native.py --proxy socks5://127.0.0.1:10808 \
 
 0.6.0 增加 schema v4 和 `oo export`。每个版本可以在 `artifacts` 之外提供
 `projects`，也可以只提供项目。项目是可编辑的 DevEco 工程归档，可包含 ArkTS/C++
-外壳、编译好的 `.so`、运行资源和离线依赖；用户导出后用 DevEco 自行构建、签名和安装。
+外壳、编译好的 `.so`、运行资源和离线依赖。用户可以用 DevEco 自行构建，也可以显式添加
+`--install`，由 oo 准备工具并完成调试签名、构建和设备安装。
 
 ```zsh
 oo update
@@ -578,8 +584,51 @@ oo export godot-editor
 可保留所需文件并选择新目录重试。ZIP 和 tar.gz 都支持，保留执行权限及有效的包内相对软链接。
 项目中的大小写冲突直接报错，不使用 SDK 安装时保留小写变体的规则，以免丢失源码。
 
-导出不执行项目代码，不调用 DevEco 或签名工具，也不创建安装记录或命令链接。
+普通导出不执行项目代码，不调用 DevEco 或签名工具，也不创建安装记录或命令链接。
 导出的目录由用户维护，`oo remove` 不管理它；下载缓存仍保留在 `OHECO_ROOT` 内。
+
+### 导出后自动签名安装
+
+```zsh
+oo export godot-editor app -o ./GodotEditor --install
+# 指定远程调试地址和签名团队；--yes 接受显示的工具和安装计划：
+oo export blender app -o './Blender App' --install --device 192.168.1.10:12345 --team TEAM_ID --yes
+# 只显示计划，不导出、不安装工具、不登录或连接设备：
+oo export godot-editor app -o ./GodotEditor --install --dry-run
+```
+
+`--install` 复用现有 `projects` 元数据，按工程的产品配置构建 debug APP；使用 `--product`
+指定产品，省略时选择唯一产品或 `default`。目标设备需支持 APP 直接安装（API 22+），同时
+满足工程最低 API。此功能不增加单独的 `app install` 命令，也不处理本地裸包。
+
+oo 优先使用现有 Command Line Tools 和 Node.js 22+，缺失时通过原有包安装流程准备。
+需要自动签名且没有官方 CLI 时，通过 npm 安装固定版本 `@deveco/deveco-cli@1.3.5`。
+当前完整工具集下载约 2.03 GiB、安装约 6.98 GiB，还需解压暂存空间。确认完整计划后，
+嵌套工具安装不重复提问；`--yes` 不代替浏览器授权、团队选择或设备信任操作。
+
+USB 设备由 HDC 发现。远程设备可用 `--device IP:port`，未指定设备时按提示选择已连接设备，
+或先在系统设置打开远程调试并输入地址。设备须解锁并接受 HDC 信任提示。
+已有适用于当前 bundle、目标 UDID、权限和有效期的 debug 签名配置会被复用；否则 oo
+在前台委托 `devecocli auth login`。当前 HarmonyOS CLI 打印授权链接，用户需在同机浏览器
+完成登录。CLI 1.3.5 要求中国区已实名开发者账号及可用团队，云设备注册和权限批准受官方
+服务限制；HDC 连接成功不等于已取得调试签名授权。
+
+自动签名使用 `$XDG_CONFIG_HOME/oheco/export-signing/` 中的稳定最小工程，让相同包、项目、
+bundle 和团队跨导出目录及版本复用 CLI 签名身份。官方 CLI 继续管理自己的登录态和 `.ohos`
+材料，不复制用户令牌或 HDC 密钥。需将 `XDG_CONFIG_HOME` 指向应用私有配置目录；构建配置的
+中断恢复日志保存在其中的 `oheco/export-recovery/`，恢复时保留任何外部编辑。操作临时文件使用
+`TMPDIR`。沿用现有 HTTP/SOCKS5 代理，官方工具所需的本地转接随操作结束清理。显式 `COMMAND_LINE_TOOL_PATH` 选择工具集，`OHECO_DEVECOCLI` 可指定
+官方公开 CLI 入口。构建通过官方 OHPM/Hvigor，项目依赖和首次工具依赖可能访问其配置的源。
+
+Hvigor 根据选中 product 构建并签署工程模块。oo 按 SDK 的目标及 artifactName 规则选择本次
+新产出的 HAP/HSP，对私有快照分别检查 bundle、版本、签名及 Profile，再用同一批快照交给
+HDC 一次覆盖安装并查询实际 bundle 版本。此入口只处理导出的工程，不接收现成 HAP 进行签名。
+CLT 26.0.0.201 的已知工程边界缺陷由当前构建进程内的定向适配处理。
+覆盖安装保留应用数据，失败不自动卸载或清除数据。安装不启动应用。
+工程根目录的 `.oo-export-install.json` 记录导出来源和最终安装结果；失败会保留工程，
+再次执行相同版本、项目和输出目录的 `oo export ... --install` 可继续。恢复使用该目录当前
+源码，不覆盖用户修改；不同来源的目录会被拒绝。普通 `oo export` 仍拒绝重名目标。
+
 只提供项目的版本使用 `oo install` 时会提示改用 `oo export`。
 
 `projects` 是项目名到归档描述的映射，字段包括 `url`、`sha256`、`size`、`format`、

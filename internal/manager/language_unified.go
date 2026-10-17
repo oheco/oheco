@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -467,7 +468,13 @@ func inspectLanguagePython(ctx context.Context, python string, env []string) (la
 }
 
 func languageProbe(ctx context.Context, program string, env []string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	timeout := 15 * time.Second
+	// Native Python startup/imports on hmdfs can exceed 20 seconds. Keep a
+	// bounded probe without mistaking a healthy installed tool for a missing one.
+	if runtime.GOOS == "ohos" {
+		timeout = 45 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Env = env
