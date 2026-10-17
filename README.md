@@ -619,6 +619,8 @@ bundle 和团队跨导出目录及版本复用 CLI 签名身份。官方 CLI 继
 中断恢复日志保存在其中的 `oheco/export-recovery/`，恢复时保留任何外部编辑。操作临时文件使用
 `TMPDIR`。沿用现有 HTTP/SOCKS5 代理，官方工具所需的本地转接随操作结束清理。显式 `COMMAND_LINE_TOOL_PATH` 选择工具集，`OHECO_DEVECOCLI` 可指定
 官方公开 CLI 入口。构建通过官方 OHPM/Hvigor，项目依赖和首次工具依赖可能访问其配置的源。
+Hvigor 与其官方插件由选定 CLT 提供；根目录开发依赖中同名的这两个构建工具不交给 OHPM 下载。
+该处理只影响安装依赖时的临时配置，完成或失败后恢复原始字节；其他项目依赖照常安装。
 
 Hvigor 根据选中 product 构建并签署工程模块。oo 按 SDK 的目标及 artifactName 规则选择本次
 新产出的 HAP/HSP，对私有快照分别检查 bundle、版本、签名及 Profile，再用同一批快照交给

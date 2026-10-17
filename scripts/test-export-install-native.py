@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--team')
     parser.add_argument('--source-package', help='Export this real catalog project as the test source instead of CLI scaffolding')
     parser.add_argument('--report-dir', required=True)
+    parser.add_argument('--keep-workspace', action='store_true', help='Retain the private fixture workspace for diagnosis and same-command recovery')
     args = parser.parse_args()
     report = Path(args.report_dir).resolve()
     report.mkdir(parents=True, exist_ok=True)
@@ -95,8 +96,12 @@ def main():
 
     servers = []
     try:
-        with tempfile.TemporaryDirectory(prefix='oo-export-install-native-', dir=os.environ['TMPDIR']) as work:
-            root = Path(work)
+        with tempfile.TemporaryDirectory(prefix='oo-export-install-native-', dir=os.environ['TMPDIR'], delete=not args.keep_workspace) as work:
+            root = Path(work).resolve()
+            assert root.parent == Path(os.environ['TMPDIR']).resolve() and root.name.startswith('oo-export-install-native-')
+            if args.keep_workspace:
+                print(f'Retaining private fixture workspace: {root}', flush=True)
+                (report / 'workspace.json').write_text(json.dumps({'workspace': str(root)}, indent=2) + '\n')
             runtime = root / 'runtime'
             runtime.mkdir()
             (runtime / 'libc++_shared.so').symlink_to(clt / 'sdk/default/openharmony/native/llvm/lib/aarch64-linux-ohos/libc++_shared.so')
@@ -124,7 +129,7 @@ if(process.argv[3]==='scaffold') for(const file of ['oh-package.json5','entry/oh
 '''
             run([args.node, '-e', configure, '--', clt / 'hvigor/hvigor-ohos-plugin/node_modules/json5', source, 'catalog' if args.source_package else 'scaffold', clt / 'sdk/default/sdk-pkg.json'])
             archive = root / 'fixture.zip'
-            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as output:
+            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_STORED if args.source_package else zipfile.ZIP_DEFLATED, compresslevel=1) as output:
                 for filename in sorted(source.rglob('*')):
                     if filename.is_file():
                         output.write(filename, Path('project') / filename.relative_to(source))

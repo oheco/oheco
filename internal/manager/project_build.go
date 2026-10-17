@@ -113,8 +113,7 @@ func (i *projectInstaller) buildAndInstall(ctx context.Context) (result error) {
 		return err
 	}
 	node := filepath.Join(i.tools.clt, "node/bin/node")
-	fmt.Fprintln(i.m.Out, "Installing the exported project's OHPM dependencies with the selected Command Line Tools.")
-	if _, err = i.command(ctx, 10*time.Minute, "install project dependencies", node, filepath.Join(i.tools.clt, "ohpm/bin/pm-cli.js"), "install", "--all"); err != nil {
+	if err = i.installDependencies(ctx); err != nil {
 		return err
 	}
 	buildEnv, err := i.buildEnvironment()
